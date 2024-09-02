@@ -2,8 +2,8 @@ package replicator
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync/atomic"
 	"time"
 
@@ -22,13 +22,36 @@ var (
 )
 
 type Replicator interface {
-	Pull(context.Context) error
+	// Pull is a blocking method which pulls changes from an external source,
+	// sending all found changesets on the given changeset channel.
+	Pull(context.Context, chan *changeset.Changeset) error
+
+	// Commit commits the current watermark across the backing datastores - remote
+	// and local.  Note that the remote may be committed at specific intervals,
+	// so no guarantee of an immediate commit is provided.
+	Commit(changeset.Watermark)
 }
+
+// PostgresWatermarker is a function which saves a given postgres changeset to storage.  This allows
+// us to continue picking up from where the stream left off if services restart.
+type PostgresWatermarkSaver func(ctx context.Context, watermark changeset.Watermark) error
+
+// PostgresWatermarkLoader is a function which loads a postgres watermark for the given database connection.
+//
+// If this returns nil, we will use the current DB LSN as the starting point, ie. using the latest available
+// stream data.
+//
+// If this returns an error the CDC replicator will fail early.
+type PostgresWatermarkLoader func(ctx context.Context) (*changeset.Watermark, error)
 
 type PostgresOpts struct {
 	Config pgx.ConnConfig
+
+	WatermarkSaver  PostgresWatermarkSaver
+	WatermarkLoader PostgresWatermarkLoader
 }
 
+// Postgres returns a new postgres replicator for a single postgres database.
 func Postgres(ctx context.Context, opts PostgresOpts) (Replicator, error) {
 	cfg, _ := pgconn.ParseConfig(opts.Config.ConnString())
 	// Ensure that we add "replication": "database" as a to the replication
@@ -65,45 +88,62 @@ func Postgres(ctx context.Context, opts PostgresOpts) (Replicator, error) {
 }
 
 type pg struct {
-	decoder decoder.Decoder
+	// opts stores the initialization opts, including watermark functs
+	opts PostgresOpts
 
+	// conn is the WAL connection
 	conn *pgconn.PgConn
-
+	// decoder decodes the binary WAL log
+	decoder decoder.Decoder
 	// nextReportTime records the time in which we must next report the current
 	// LSN to the pg server, advancing the replication slot.
 	nextReportTime time.Time
-	lsn            uint64
+	// lsn is the current LSN
+	lsn uint64
+	// lsnTime is the server time for the LSN, stored as a uint64 nanosecond epoch.
+	lsnTime int64
+
+	log *slog.Logger
 }
 
-func (p *pg) Pull(ctx context.Context) error {
+// Commit commits the current watermark into the postgres replicator.  The postgres replicator
+// will transmit the committed LSN to the remote server at the next interval (or on shutdown),
+// and will save the committed watermark to local state via the PostgresWatermarkSaver function
+// provided during instantiation.
+func (p *pg) Commit(wm changeset.Watermark) {
+	atomic.StoreUint64(&p.lsn, uint64(wm.LSN))
+	atomic.StoreInt64(&p.lsnTime, wm.ServerTime.UnixNano())
+}
 
-	// TODO:
-	// - Is this the first time that we've ever connected to this DB?
-	//   - If so, upsert metadata our side
-	//
-	// 1. Fetch system info, including current LSN
-	// 2. Subscribe.
-	// 3. Pull events and transform WAL
-
+func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 	identify, err := pglogrepl.IdentifySystem(ctx, p.conn)
 	if err != nil {
 		return fmt.Errorf("error identifying postgres: %w", err)
 	}
 
-	// TODO: If PG <= 14, throw an error.
+	// By default, start at the current LSN, ie. the latest point in the stream.
+	startLSN := identify.XLogPos
+
+	if p.opts.WatermarkLoader != nil {
+		watermark, err := p.opts.WatermarkLoader(ctx)
+		if err != nil {
+			return fmt.Errorf("error loading watermark: %w", err)
+		}
+		startLSN = watermark.LSN
+	}
+
 	err = pglogrepl.StartReplication(
 		ctx,
 		p.conn,
 		pgconsts.SlotName,
-		identify.XLogPos,
+		startLSN,
 		pglogrepl.StartReplicationOptions{
 			Mode:       pglogrepl.LogicalReplication,
 			PluginArgs: p.decoder.ReplicationPluginArgs(),
 		},
 	)
-
 	if err != nil {
-		// TODO: Failure modes - what if the LSN is too far behind?
+		// XXX: Failure modes - what if the LSN is too far behind?
 		return fmt.Errorf("error starting logical replication: %w", err)
 	}
 
@@ -120,9 +160,7 @@ func (p *pg) Pull(ctx context.Context) error {
 			continue
 		}
 
-		// TODO: Create Inngest event for each change.
-		byt, _ := json.MarshalIndent(changes, "", "  ")
-		fmt.Println(string(byt))
+		cc <- changes
 	}
 }
 
@@ -130,9 +168,13 @@ func (p *pg) fetch(ctx context.Context) (*changeset.Changeset, error) {
 	var err error
 
 	defer func() {
+		// Note that this reports the committed LSN called via Commit().  If the
+		// caller to the postgres replicator never calls Commit() to let us know
+		// that the changeset.Changeset has been fully processed, the DB will never
+		// receive new updates and the WAL log will grow indefinitely.
 		if time.Now().After(p.nextReportTime) {
 			if err = p.report(ctx, p.nextReportTime.IsZero()); err != nil {
-				// TODO: Log plz
+				p.log.Error("error reporting lsn progress", "error", err)
 			}
 			p.nextReportTime = time.Now().Add(5 * time.Second)
 		}
@@ -169,9 +211,6 @@ func (p *pg) fetch(ctx context.Context) (*changeset.Changeset, error) {
 		if pkm.ReplyRequested {
 			p.forceNextReport()
 		}
-
-		// TODO: Store LSN and watermark here locally to keep updated w/ progress.
-
 		return nil, nil
 	case pglogrepl.XLogDataByteID:
 		xld, err := pglogrepl.ParseXLogData(msg.Data[1:])
@@ -202,6 +241,14 @@ func (p *pg) fetch(ctx context.Context) (*changeset.Changeset, error) {
 	return nil, nil
 }
 
+func (p *pg) committedWatermark() (wm changeset.Watermark) {
+	lsn, nano := atomic.LoadUint64(&p.lsn), atomic.LoadInt64(&p.lsnTime)
+	return changeset.Watermark{
+		LSN:        pglogrepl.LSN(lsn),
+		ServerTime: time.Unix(0, nano),
+	}
+}
+
 func (p *pg) forceNextReport() {
 	// Updating the next report time to a zero time always reports the LSN,
 	// as time.Now() is always after the empty time.
@@ -216,13 +263,21 @@ func (p *pg) report(ctx context.Context, forceReply bool) error {
 	if lsn == 0 {
 		return nil
 	}
-	return pglogrepl.SendStandbyStatusUpdate(ctx,
+	err := pglogrepl.SendStandbyStatusUpdate(ctx,
 		p.conn,
 		pglogrepl.StandbyStatusUpdate{
 			WALWritePosition: lsn,
 			ReplyRequested:   forceReply,
 		},
 	)
+	if err != nil {
+		return fmt.Errorf("error sending pg status update: %w", err)
+	}
+	if p.opts.WatermarkSaver != nil {
+		// Also commit this watermark to local state.
+		return p.opts.WatermarkSaver(ctx, p.committedWatermark())
+	}
+	return nil
 }
 
 func (p *pg) LSN() (lsn pglogrepl.LSN) {
