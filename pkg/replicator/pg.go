@@ -2,18 +2,19 @@ package replicator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync/atomic"
 	"time"
 
+	"github.com/inngest/pgcap/pkg/changeset"
+	"github.com/inngest/pgcap/pkg/consts/pgconsts"
+	"github.com/inngest/pgcap/pkg/decoder"
+	"github.com/inngest/pgcap/pkg/schema"
 	"github.com/jackc/pglogrepl"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
-)
-
-const (
-	SlotName        = "inngest_cdc"
-	PublicationName = "inngest"
 )
 
 var (
@@ -25,23 +26,46 @@ type Replicator interface {
 }
 
 type PostgresOpts struct {
-	Config pgconn.Config
+	Config pgx.ConnConfig
 }
 
 func Postgres(ctx context.Context, opts PostgresOpts) (Replicator, error) {
-	conn, err := pgconn.ConnectConfig(ctx, &opts.Config)
+	cfg, _ := pgconn.ParseConfig(opts.Config.ConnString())
+	// Ensure that we add "replication": "database" as a to the replication
+	// configuration
+	replConfig := cfg.Copy()
+	replConfig.RuntimeParams["replication"] = "database"
+	// And for schema inspection, ensure this is never set.
+	schemaConfig := opts.Config.Copy()
+	delete(schemaConfig.RuntimeParams, "replication")
+
+	// Connect using pgconn for replication.  This is a prerequisite, as
+	// replication uses different client connection parameters to enable specific
+	// postgres functionality.
+	conn, err := pgconn.ConnectConfig(ctx, replConfig)
 	if err != nil {
-		return nil, fmt.Errorf("error connecting to postgres host: %w", err)
+		return nil, fmt.Errorf("error connecting to postgres host for replication: %w", err)
+	}
+
+	pgxc, err := pgx.ConnectConfig(ctx, schemaConfig)
+	if err != nil {
+		return nil, fmt.Errorf("error connecting to postgres host for schemas: %w", err)
+	}
+
+	sl := schema.NewPGXSchemaLoader(pgxc)
+	// Refresh all schemas to begin with
+	if err := sl.Refresh(); err != nil {
+		return nil, err
 	}
 
 	return &pg{
 		conn:    conn,
-		decoder: v1LogicalDecoder{},
+		decoder: decoder.NewV1LogicalDecoder(sl),
 	}, nil
 }
 
 type pg struct {
-	decoder Decoder
+	decoder decoder.Decoder
 
 	conn *pgconn.PgConn
 
@@ -60,22 +84,17 @@ func (p *pg) Pull(ctx context.Context) error {
 	// 1. Fetch system info, including current LSN
 	// 2. Subscribe.
 	// 3. Pull events and transform WAL
-	//
 
 	identify, err := pglogrepl.IdentifySystem(ctx, p.conn)
 	if err != nil {
 		return fmt.Errorf("error identifying postgres: %w", err)
 	}
 
-	fmt.Printf("%#v\n", identify)
-
-	// TODO: If PG <= 14, don't use these args.
-	// TODO: pgcapture doesn't use proto_version 2 - it uses proto 1
-
+	// TODO: If PG <= 14, throw an error.
 	err = pglogrepl.StartReplication(
 		ctx,
 		p.conn,
-		SlotName,
+		pgconsts.SlotName,
 		identify.XLogPos,
 		pglogrepl.StartReplicationOptions{
 			Mode:       pglogrepl.LogicalReplication,
@@ -94,22 +113,23 @@ func (p *pg) Pull(ctx context.Context) error {
 		}
 
 		changes, err := p.fetch(ctx)
-
 		if err != nil {
 			fmt.Println("error: ", err)
 			return err
 		}
+		if changes == nil {
+			continue
+		}
 
-		// TODO: Changes
-		_ = changes
+		byt, _ := json.MarshalIndent(changes, "", "  ")
+		fmt.Println(string(byt))
+
+		// TODO: Create Inngest event for each change.
 	}
 }
 
-func (p *pg) fetch(ctx context.Context) (Change, error) {
-	var (
-		change Change
-		err    error
-	)
+func (p *pg) fetch(ctx context.Context) (*changeset.Changeset, error) {
+	var err error
 
 	defer func() {
 		if time.Now().After(p.nextReportTime) {
@@ -128,59 +148,60 @@ func (p *pg) fetch(ctx context.Context) (Change, error) {
 		if pgconn.Timeout(err) {
 			p.forceNextReport()
 			// We return nil as we want to keep iterating.
-			return change, nil
+			return nil, nil
 		}
-		return change, err
+		return nil, err
 	}
 
 	if errMsg, ok := rawMsg.(*pgproto3.ErrorResponse); ok {
-		return change, fmt.Errorf("received pg wal error: %#v", errMsg)
+		return nil, fmt.Errorf("received pg wal error: %#v", errMsg)
 	}
 
 	msg, ok := rawMsg.(*pgproto3.CopyData)
 	if !ok {
-		return change, fmt.Errorf("unknown message type: %T", rawMsg)
+		return nil, fmt.Errorf("unknown message type: %T", rawMsg)
 	}
 
 	switch msg.Data[0] {
 	case pglogrepl.PrimaryKeepaliveMessageByteID:
-		// Keepalives are part of the process with logical replication.
-		// We need to XYZ...
 		pkm, err := pglogrepl.ParsePrimaryKeepaliveMessage(msg.Data[1:])
 		if err != nil {
-			return change, fmt.Errorf("error parsing replication keepalive: %w", err)
+			return nil, fmt.Errorf("error parsing replication keepalive: %w", err)
 		}
-
 		if pkm.ReplyRequested {
 			p.forceNextReport()
 		}
 
-		return Change{
-			Watermark: Watermark{
-				LSN:        pkm.ServerWALEnd,
-				ServerTime: pkm.ServerTime,
-			},
-		}, nil
+		// TODO: Store LSN and watermark here locally to keep updated w/ progress.
 
+		return nil, nil
 	case pglogrepl.XLogDataByteID:
 		xld, err := pglogrepl.ParseXLogData(msg.Data[1:])
 		if err != nil {
-			return change, fmt.Errorf("error parsing replication txn data: %w", err)
+			return nil, fmt.Errorf("error parsing replication txn data: %w", err)
+		}
+
+		cs := changeset.Changeset{
+			Watermark: changeset.Watermark{
+				// NOTE: It's expected that WALStart and ServerWALEnd
+				// are the same.
+				LSN:        xld.WALStart,
+				ServerTime: xld.ServerTime,
+			},
 		}
 
 		// xld.WALData may be reused, so copy the slice ASAP.
-		m, err := p.decoder.Decode(copySlice(xld.WALData))
+		ok, err = p.decoder.Decode(copySlice(xld.WALData), &cs)
 		if err != nil {
-			return change, err
+			return nil, fmt.Errorf("error decoding xlog data: %w", err)
 		}
-		if m == nil {
-			return change, nil
+		if !ok {
+			return nil, nil
 		}
-
-		fmt.Printf("XLOG: %s\n", m)
+		return &cs, nil
 	}
 
-	return change, nil
+	return nil, nil
 }
 
 func (p *pg) forceNextReport() {

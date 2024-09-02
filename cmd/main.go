@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/inngest/pgcap/pkg/replicator"
-	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5"
 )
 
 func main() {
@@ -20,7 +20,7 @@ func main() {
 		cstr = "postgres://inngest:password@localhost:5432/db?replication=database"
 	}
 
-	config, err := pgconn.ParseConfig(cstr)
+	config, err := pgx.ParseConfig(cstr)
 	if err != nil {
 		panic(err)
 	}
