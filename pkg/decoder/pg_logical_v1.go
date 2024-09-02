@@ -2,6 +2,7 @@ package decoder
 
 import (
 	"fmt"
+	"log/slog"
 	"strconv"
 
 	"github.com/inngest/pgcap/pkg/changeset"
@@ -19,8 +20,9 @@ func NewV1LogicalDecoder(s *schema.PGXSchemaLoader) Decoder {
 }
 
 type v1LogicalDecoder struct {
-	schema *schema.PGXSchemaLoader
+	log *slog.Logger
 
+	schema    *schema.PGXSchemaLoader
 	relations map[uint32]*pglogrepl.RelationMessage
 }
 
@@ -78,13 +80,14 @@ func (v v1LogicalDecoder) Decode(in []byte, cs *changeset.Changeset) (bool, erro
 
 	default:
 		// Unsupported message - log and carry on.
+		v.log.Debug("unsupported message type in v1 decoder", "msg_type", msgType.String())
 	}
 
 	return false, nil
 }
 
 func (v v1LogicalDecoder) mutateChangeset(in pglogrepl.Message, cs *changeset.Changeset) error {
-	// TODO: When seeing a begin, annotate the transaction ID, LSN,
+	// XXX: When seeing a begin, annotate the transaction ID, LSN,
 	// and commit time to all messages between the begin and commit.
 
 	switch msg := in.(type) {
@@ -105,8 +108,6 @@ func (v v1LogicalDecoder) mutateChangeset(in pglogrepl.Message, cs *changeset.Ch
 		for _, id := range msg.RelationIDs {
 			rel, _ := v.relations[id]
 			if rel == nil {
-				// TODO: Log a warning here.  This should never happen, and is an indicator
-				// that something bad happened.
 				return fmt.Errorf("couldn't find relation for truncate in relation OID: %d", id)
 			}
 			cs.Data.TruncatedTables = append(cs.Data.TruncatedTables, rel.RelationName)
@@ -115,38 +116,40 @@ func (v v1LogicalDecoder) mutateChangeset(in pglogrepl.Message, cs *changeset.Ch
 	case *pglogrepl.InsertMessage:
 		cs.Operation = changeset.OperationInsert
 
-		// PG always sends a RelationMessage before DMLs, so we can grab table information
-		// here.
-		rel, _ := v.relations[msg.RelationID]
-		if rel == nil {
-			// TODO: Log a warning here.  This should never happen, and is an indicator
-			// that something bad happened.
-			return fmt.Errorf("couldn't find relation for insert in relation OID: %d", msg.RelationID)
+		rel, err := v.findRelationByOID(msg.RelationID)
+		if err != nil {
+			return err
 		}
+
 		cs.Data.Table = rel.RelationName
 
 		if msg.Tuple != nil {
 			var err error
 			cs.Data.New, err = v.parseTuple(msg.Tuple, rel)
 			if err != nil {
-				// TODO: Log
+				v.log.Error("error parsing new tuple",
+					"operation", "insert",
+					"relation_id", msg.RelationID,
+					"error", err,
+				)
 			}
 		} else {
-			// TODO: Log here.  Updates should always include new tuple data.
+			v.log.Error("insert didn't include new tuple data",
+				"operation", "insert",
+				"relation_id", msg.RelationID,
+				"error", err,
+			)
 		}
 
 	case *pglogrepl.UpdateMessage:
 		var err error
 		cs.Operation = changeset.OperationUpdate
 
-		// PG always sends a RelationMessage before DMLs, so we can grab table information
-		// here.
-		rel, _ := v.relations[msg.RelationID]
-		if rel == nil {
-			// TODO: Log a warning here.  This should never happen, and is an indicator
-			// that something bad happened.
-			return fmt.Errorf("couldn't find relation for update in relation OID: %d", msg.RelationID)
+		rel, err := v.findRelationByOID(msg.RelationID)
+		if err != nil {
+			return err
 		}
+
 		cs.Data.Table = rel.RelationName
 
 		if msg.OldTuple != nil {
@@ -154,43 +157,58 @@ func (v v1LogicalDecoder) mutateChangeset(in pglogrepl.Message, cs *changeset.Ch
 			// data pre-update.
 			cs.Data.Old, err = v.parseTuple(msg.OldTuple, rel)
 			if err != nil {
-				// TODO: Log
+				v.log.Error("error parsing old tuple",
+					"operation", "insert",
+					"relation_id", msg.RelationID,
+					"error", err,
+				)
 			}
 		}
-
 		if msg.NewTuple != nil {
 			cs.Data.New, err = v.parseTuple(msg.OldTuple, rel)
 			if err != nil {
-				// TODO: Log
+				v.log.Error("error parsing new tuple",
+					"operation", "insert",
+					"relation_id", msg.RelationID,
+					"error", err,
+				)
 			}
 		} else {
-			// TODO: Log here.  Updates should always include new tuple data.
+			v.log.Error("update had no new data", "relation_id", msg.RelationID)
 		}
 
 	case *pglogrepl.DeleteMessage:
 		var err error
 		cs.Operation = changeset.OperationDelete
 
-		// PG always sends a RelationMessage before DMLs, so we can grab table information
-		// here.
-		rel, _ := v.relations[msg.RelationID]
-		if rel == nil {
-			// TODO: Log a warning here.  This should never happen, and is an indicator
-			// that something bad happened.
-			return fmt.Errorf("couldn't find relation for delete in relation OID: %d", msg.RelationID)
+		rel, err := v.findRelationByOID(msg.RelationID)
+		if err != nil {
+			return err
 		}
+
 		cs.Data.Table = rel.RelationName
 		if msg.OldTuple != nil {
 			// Table has REPLICA IDENTITY FULL set;  we can add in old
 			// data pre-update.
 			cs.Data.Old, err = v.parseTuple(msg.OldTuple, rel)
 			if err != nil {
-				// TODO: Log
+				v.log.Error("delete had no old tuple data", "relation_id", msg.RelationID)
 			}
 		}
 	}
 
 	return nil
+}
+
+func (v v1LogicalDecoder) findRelationByOID(oid uint32) (*pglogrepl.RelationMessage, error) {
+	// PG always sends a RelationMessage before DMLs, so we can grab table information
+	// here and this should _always_ be present.
+	rel, _ := v.relations[oid]
+	if rel == nil {
+		v.log.Warn("no relation found for oid", "oid", oid)
+		return nil, fmt.Errorf("couldn't find relation in decoder: %d", oid)
+	}
+	return rel, nil
 }
 
 func (v1LogicalDecoder) parseTuple(tpl *pglogrepl.TupleData, rm *pglogrepl.RelationMessage) (changeset.UpdateTuples, error) {

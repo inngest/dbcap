@@ -4,7 +4,6 @@ go 1.22.0
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
-	github.com/davecgh/go-spew v1.1.1
 	github.com/jackc/pglogrepl v0.0.0-20240307033717-828fbfe908e9
 	github.com/jackc/pgx/v5 v5.6.0
 	github.com/replicase/pgcapture v0.0.62

@@ -114,17 +114,15 @@ func (p *pg) Pull(ctx context.Context) error {
 
 		changes, err := p.fetch(ctx)
 		if err != nil {
-			fmt.Println("error: ", err)
 			return err
 		}
 		if changes == nil {
 			continue
 		}
 
+		// TODO: Create Inngest event for each change.
 		byt, _ := json.MarshalIndent(changes, "", "  ")
 		fmt.Println(string(byt))
-
-		// TODO: Create Inngest event for each change.
 	}
 }
 
