@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 
+	"github.com/inngest/pgcap/pkg/eventwriter"
 	"github.com/inngest/pgcap/pkg/replicator"
 	"github.com/jackc/pgx/v5"
 )
@@ -32,7 +33,12 @@ func main() {
 		panic(err)
 	}
 
-	if err := r.Pull(ctx); err != nil {
+	writer := eventwriter.NewAPIClientWriter(ctx, nil, 10)
+	csChan := writer.Listen(ctx)
+
+	if err := r.Pull(ctx, csChan); err != nil {
 		panic(err)
 	}
+
+	writer.Wait()
 }

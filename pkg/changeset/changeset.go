@@ -1,6 +1,7 @@
 package changeset
 
 import (
+	"strings"
 	"time"
 
 	"github.com/jackc/pglogrepl"
@@ -16,6 +17,25 @@ const (
 	OperationDelete   = "DELETE"
 	OperationTruncate = "TRUNCATE"
 )
+
+func (o Operation) ToEventVerb() string {
+	switch o {
+	case OperationBegin:
+		return "tx-began"
+	case OperationCommit:
+		return "tx-committed"
+	case OperationInsert:
+		return "inserted"
+	case OperationUpdate:
+		return "updated"
+	case OperationDelete:
+		return "deleted"
+	case OperationTruncate:
+		return "truncated"
+	default:
+		return strings.ToLower(string(o))
+	}
+}
 
 type Changeset struct {
 	// Watermark represents the internal watermark for this changeset op.
