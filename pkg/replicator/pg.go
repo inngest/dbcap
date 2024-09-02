@@ -21,15 +21,19 @@ var (
 	ReadTimeout = time.Second * 5
 )
 
+type WatermarkCommitter interface {
+	// Commit commits the current watermark across the backing datastores - remote
+	// and local.  Note that the remote may be committed at specific intervals,
+	// so no guarantee of an immediate commit is provided.
+	Commit(changeset.Watermark)
+}
+
 type Replicator interface {
 	// Pull is a blocking method which pulls changes from an external source,
 	// sending all found changesets on the given changeset channel.
 	Pull(context.Context, chan *changeset.Changeset) error
 
-	// Commit commits the current watermark across the backing datastores - remote
-	// and local.  Note that the remote may be committed at specific intervals,
-	// so no guarantee of an immediate commit is provided.
-	Commit(changeset.Watermark)
+	WatermarkCommitter
 }
 
 // PostgresWatermarker is a function which saves a given postgres changeset to storage.  This allows

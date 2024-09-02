@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/inngest/pgcap/pkg/changeset"
+	"github.com/inngest/pgcap/pkg/replicator"
 )
 
 const (
@@ -22,7 +23,21 @@ var (
 	batchTimeout = 100 * time.Millisecond
 )
 
-func NewAPIClientWriter(ctx context.Context, client any, batchSize int) EventWriter {
+type EventWriter interface {
+	// Listen returns a channel in which Changesets can be published.  Any published
+	// changesets will be broadcast as an event.
+	Listen(ctx context.Context, committer replicator.WatermarkCommitter) chan *changeset.Changeset
+
+	// Wait waits for all events to be processed before shutting down.  This must be
+	// called after the Listen context has been cancelled.
+	Wait()
+}
+
+func NewAPIClientWriter(
+	ctx context.Context,
+	client any,
+	batchSize int,
+) EventWriter {
 	cs := make(chan *changeset.Changeset, batchSize)
 	return &apiWriter{
 		client:    client,
@@ -30,16 +45,6 @@ func NewAPIClientWriter(ctx context.Context, client any, batchSize int) EventWri
 		batchSize: batchSize,
 		wg:        sync.WaitGroup{},
 	}
-}
-
-type EventWriter interface {
-	// Listen returns a channel in which Changesets can be published.  Any published
-	// changesets will be broadcast as an event.
-	Listen(ctx context.Context) chan *changeset.Changeset
-
-	// Wait waits for all events to be processed before shutting down.  This must be
-	// called after the Listen context has been cancelled.
-	Wait()
 }
 
 // ChangesetToEvent returns a map containing event data for the given changeset.
@@ -61,6 +66,10 @@ func ChangesetToEvent(cs changeset.Changeset) map[string]any {
 }
 
 type apiWriter struct {
+	// commit records the sent event's LSN to the replicator, allowing us to safely
+	// communicate that we've processed the given event.
+	commit replicator.WatermarkCommitter
+
 	client    any
 	cs        chan *changeset.Changeset
 	batchSize int
@@ -81,7 +90,7 @@ type apiWriter struct {
 	ctxDone int32
 }
 
-func (a *apiWriter) Listen(ctx context.Context) chan *changeset.Changeset {
+func (a *apiWriter) Listen(ctx context.Context, committer replicator.WatermarkCommitter) chan *changeset.Changeset {
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -117,7 +126,11 @@ func (a *apiWriter) Listen(ctx context.Context) chan *changeset.Changeset {
 				// We have events after a timeout - send them.
 				if err := a.send(buf); err != nil {
 					// TODO: Fail.  What do we do here?
+				} else {
+					// Commit the last LSN.
+					committer.Commit(buf[i-1].Watermark)
 				}
+
 				// reset the buffer
 				buf = make([]*changeset.Changeset, a.batchSize)
 				i = 0
@@ -132,6 +145,8 @@ func (a *apiWriter) Listen(ctx context.Context) chan *changeset.Changeset {
 					// Send the last batch.
 					if err := a.send(buf); err != nil {
 						// TODO: Fail.  What do we do here?
+					} else {
+						committer.Commit(buf[i-1].Watermark)
 					}
 					return
 				}
@@ -140,6 +155,8 @@ func (a *apiWriter) Listen(ctx context.Context) chan *changeset.Changeset {
 					// send this batch.
 					if err := a.send(buf); err != nil {
 						// TODO: Fail.  What do we do here?
+					} else {
+						committer.Commit(buf[i-1].Watermark)
 					}
 					// reset the buffer
 					buf = make([]*changeset.Changeset, a.batchSize)

@@ -34,7 +34,7 @@ func main() {
 	}
 
 	writer := eventwriter.NewAPIClientWriter(ctx, nil, 10)
-	csChan := writer.Listen(ctx)
+	csChan := writer.Listen(ctx, r)
 
 	if err := r.Pull(ctx, csChan); err != nil {
 		panic(err)
