@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/inngest/pgcap/pkg/changeset"
@@ -75,35 +74,9 @@ type apiWriter struct {
 	batchSize int
 
 	wg sync.WaitGroup
-
-	// ctxDone indicates that the parent ctx has been closed.  We use this instead
-	// of the raw ctx.Done() directly, as there's a *very small* race condition:
-	//   1. We receive WAL from PG
-	//   2. Context is done, but parsing is still occurring
-	//   3. We then send the changeset on the channel.
-	//
-	// In this instance, at t2 the ctx is done, the channel is empty, but a message
-	// is still pending.
-	//
-	// Although we'll pick this message up next time, we wait 1 second after the
-	// context is done until we prevent listening on the changeset chan.
-	ctxDone int32
 }
 
 func (a *apiWriter) Listen(ctx context.Context, committer replicator.WatermarkCommitter) chan *changeset.Changeset {
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
-		<-ctx.Done()
-		// Wait is called when the parent context has finished, whicb presumably means
-		// that the replicator has also terminated.  We wait such that the replicator
-		// can shut down and any in-progress events are handled appropriately.
-		//
-		// See the apiWriter.ctxDone docs for more info.
-		<-time.After(time.Second)
-		atomic.StoreInt32(&a.ctxDone, 1)
-	}()
-
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -117,7 +90,16 @@ func (a *apiWriter) Listen(ctx context.Context, committer replicator.WatermarkCo
 			timer := time.NewTimer(batchTimeout)
 
 			select {
+			case <-ctx.Done():
+				// Shutting down.  Send the existing batch.
+				if err := a.send(buf); err != nil {
+					// TODO: Fail.  What do we do here?
+				} else {
+					committer.Commit(buf[i-1].Watermark)
+				}
+				return
 			case <-timer.C:
+				// Force sending current batch
 				if i == 0 {
 					timer.Reset(batchTimeout)
 					continue
@@ -135,24 +117,8 @@ func (a *apiWriter) Listen(ctx context.Context, committer replicator.WatermarkCo
 				buf = make([]*changeset.Changeset, a.batchSize)
 				i = 0
 			case msg := <-a.cs:
-				if atomic.LoadInt32(&a.ctxDone) == 1 && len(a.cs) == 0 {
-					// This is done, stop waiting for events.
-					if i == 0 {
-						// no events - don't do anything.
-						return
-					}
-
-					// Send the last batch.
-					if err := a.send(buf); err != nil {
-						// TODO: Fail.  What do we do here?
-					} else {
-						committer.Commit(buf[i-1].Watermark)
-					}
-					return
-				}
-
 				if i == a.batchSize {
-					// send this batch.
+					// send this batch, as we're full.
 					if err := a.send(buf); err != nil {
 						// TODO: Fail.  What do we do here?
 					} else {
@@ -163,14 +129,11 @@ func (a *apiWriter) Listen(ctx context.Context, committer replicator.WatermarkCo
 					i = 0
 					continue
 				}
-
 				// Appoend the
 				buf[i] = msg
 				i++
-
 				// Send this batch after at least 5 seconds
 				timer.Reset(batchTimeout)
-
 			}
 		}
 	}()
@@ -186,8 +149,6 @@ func (a *apiWriter) send(batch []*changeset.Changeset) error {
 	// the HTTP request continues.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
-	fmt.Println(batch)
 
 	evts := make([]map[string]any, len(batch))
 	for i, cs := range batch {
