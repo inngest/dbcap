@@ -103,6 +103,7 @@ func (v v1LogicalDecoder) mutateChangeset(in pglogrepl.Message, cs *changeset.Ch
 		cs.Data.TxnLSN = uint32(msg.CommitLSN)
 		cs.Data.TxnCommitTime = msg.CommitTime
 		return nil
+
 	case *pglogrepl.TruncateMessage:
 		cs.Operation = changeset.OperationTruncate
 		cs.Data.TruncatedTables = []string{}
@@ -114,6 +115,7 @@ func (v v1LogicalDecoder) mutateChangeset(in pglogrepl.Message, cs *changeset.Ch
 			cs.Data.TruncatedTables = append(cs.Data.TruncatedTables, rel.RelationName)
 		}
 		return nil
+
 	case *pglogrepl.InsertMessage:
 		cs.Operation = changeset.OperationInsert
 

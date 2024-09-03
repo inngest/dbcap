@@ -18,8 +18,7 @@ import (
 //
 
 func TestInsert(t *testing.T) {
-	// versions := []int{12, 13, 14, 15, 16}
-	versions := []int{14}
+	versions := []int{12, 13, 14, 15, 16}
 
 	for _, v := range versions {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -29,11 +28,19 @@ func TestInsert(t *testing.T) {
 		r, err := Postgres(ctx, opts)
 		require.NoError(t, err)
 
-		var count int32
-		cb := eventwriter.NewCallbackWriter(ctx, func(cs *changeset.Changeset) {
-			atomic.AddInt32(&count, 1)
+		var (
+			total   int32
+			inserts int32
+		)
 
-			switch atomic.LoadInt32(&count) {
+		cb := eventwriter.NewCallbackWriter(ctx, func(cs *changeset.Changeset) {
+			atomic.AddInt32(&total, 1)
+
+			if cs.Operation == changeset.OperationInsert {
+				atomic.AddInt32(&inserts, 1)
+			}
+
+			switch atomic.LoadInt32(&total) {
 			case 1:
 				require.EqualValues(t, changeset.OperationBegin, cs.Operation)
 			case 2:
@@ -91,12 +98,13 @@ func TestInsert(t *testing.T) {
 
 		test.InsertAccounts(t, ctx, conn, test.InsertOpts{
 			Seed:     123,
-			Max:      1,
-			Interval: 50 * time.Millisecond,
+			Max:      50,
+			Interval: 1 * time.Millisecond,
 		})
 
 		<-time.After(1 * time.Second)
-		require.EqualValues(t, 3, count)
+		require.EqualValues(t, 150, total)
+		require.EqualValues(t, 50, inserts)
 
 		cancel()
 
