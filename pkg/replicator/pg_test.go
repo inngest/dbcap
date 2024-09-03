@@ -20,7 +20,7 @@ import (
 
 func TestInsert(t *testing.T) {
 	t.Parallel()
-	versions := []int{12, 13, 14, 15, 16}
+	versions := []int{10, 11, 12, 13, 14, 15, 16}
 
 	for _, v1 := range versions {
 		v := v1 // loop capture
@@ -62,7 +62,7 @@ func TestInsert(t *testing.T) {
 							},
 							"concurrency": {
 								Encoding: "i",
-								Data:     100,
+								Data:     49,
 							},
 							"created_at": {
 								Encoding: "t",
