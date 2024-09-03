@@ -266,6 +266,124 @@ func TestUpdateMany_ReplicaIdentityFull(t *testing.T) {
 	}
 }
 
+func TestUpdateMany_DisableReplicaIdentityFull(t *testing.T) {
+	t.Parallel()
+	versions := []int{12, 13, 14, 15, 16}
+
+	for _, v1 := range versions {
+		v := v1 // loop capture
+		t.Run(fmt.Sprintf("Insert - Postgres %d", v), func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithCancel(context.Background())
+
+			c, connCfg := test.StartPG(t, ctx, test.StartPGOpts{
+				Version:                    v,
+				DisableReplicaIdentityFull: true,
+			})
+			opts := PostgresOpts{Config: connCfg}
+
+			//
+			// Insert accounts before starting replication watching.  This lets us
+			// ensure we're only testing against updates
+			//
+			test.InsertAccounts(t, ctx, connCfg, test.InsertOpts{
+				Max:      50,
+				Interval: 1 * time.Millisecond,
+			})
+
+			r, err := Postgres(ctx, opts)
+			require.NoError(t, err)
+
+			var (
+				total   int32
+				updates int32
+			)
+
+			cb := eventwriter.NewCallbackWriter(ctx, func(cs *changeset.Changeset) {
+				atomic.AddInt32(&total, 1)
+
+				if cs.Operation == changeset.OperationUpdate {
+					atomic.AddInt32(&updates, 1)
+				}
+
+				switch atomic.LoadInt32(&total) {
+				case 1:
+					require.EqualValues(t, changeset.OperationBegin, cs.Operation)
+				case 2:
+					require.EqualValues(t, changeset.OperationUpdate, cs.Operation)
+					require.Equal(t, "accounts", cs.Data.Table, "expected account name to be inserted")
+					// No old data as replica identity isn't set.
+					require.Equal(
+						t,
+						changeset.UpdateTuples(nil),
+						cs.Data.Old,
+						"Old data in update isn't correct",
+					)
+					require.Equal(
+						t,
+						changeset.UpdateTuples{
+							"billing_email": {
+								Encoding: "t",
+								Data:     "test@example.com",
+							},
+							"concurrency": {
+								Encoding: "i",
+								Data:     49,
+							},
+							"created_at": {
+								Encoding: "t",
+								Data:     "2024-08-30 07:40:00",
+							},
+							"enabled": {
+								Encoding: "t",
+								Data:     "t",
+							},
+							"id": {
+								Encoding: "t",
+								Data:     "6db2bd8a-2a2f-52d3-aa79-abb4015d6dbd",
+							},
+							"metadata": {
+								Encoding: "t",
+								Data:     "{\"ok\": true}",
+							},
+							"name": {
+								Encoding: "t",
+								Data:     "lriai1h2oy1d",
+							},
+							"updated_at": {
+								Encoding: "t",
+								Data:     "2024-08-30 07:40:00",
+							},
+						},
+						cs.Data.New,
+						"New data in update isn't correct",
+					)
+				case 52:
+					require.EqualValues(t, changeset.OperationCommit, cs.Operation)
+				}
+			})
+			csChan := cb.Listen(ctx, r)
+
+			go func() {
+				err := r.Pull(ctx, csChan)
+				require.NoError(t, err)
+			}()
+
+			_, err = test.DataConn(t, connCfg).Exec(ctx, "UPDATE accounts SET billing_email = 'test@example.com'")
+			require.NoError(t, err)
+
+			<-time.After(1 * time.Second)
+
+			require.EqualValues(t, 50, updates)
+
+			cancel()
+
+			c.Stop(ctx, nil)
+		})
+	}
+}
+
 //
 // Failure cases
 //
