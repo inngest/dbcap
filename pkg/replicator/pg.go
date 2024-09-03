@@ -22,7 +22,10 @@ var (
 	ReadTimeout = time.Second * 5
 
 	ErrLogicalReplicationNotSetUp = fmt.Errorf("ERR_PG_001: Your database does not have logical replication configured.  You must set the WAL level to 'logical' to stream events.")
-	ErrReplicationSlotNotFound    = fmt.Errorf("ERR_PG_002: The replication slot 'inngest_cdc' doesn't exist in your database.  Please create the logical replication slot to stream events.")
+
+	ErrReplicationSlotNotFound = fmt.Errorf("ERR_PG_002: The replication slot 'inngest_cdc' doesn't exist in your database.  Please create the logical replication slot to stream events.")
+
+	ErrReplicationAlreadyRunning = fmt.Errorf("ERR_PG_901: Replication is already streaming events")
 )
 
 type WatermarkCommitter interface {
@@ -152,6 +155,9 @@ func (p *pg) Connect(ctx context.Context, lsn pglogrepl.LSN) error {
 		}
 		if strings.Contains(msg, fmt.Sprintf(`replication slot "%s" does not exist`, pgconsts.SlotName)) {
 			return ErrReplicationSlotNotFound
+		}
+		if strings.Contains(msg, fmt.Sprintf(`replication slot "%s" is active`, pgconsts.SlotName)) {
+			return ErrReplicationAlreadyRunning
 		}
 		return fmt.Errorf("error starting logical replication: %w", err)
 	}

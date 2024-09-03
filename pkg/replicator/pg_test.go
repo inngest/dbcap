@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/inngest/pgcap/internal/test"
 	"github.com/stretchr/testify/require"
@@ -53,11 +54,10 @@ func TestConnectingWithoutReplicationSlotFails(t *testing.T) {
 }
 
 func TestMultipleConectionsFail(t *testing.T) {
-	// versions := []int{12, 13, 14, 15, 16}
-	versions := []int{14}
+	versions := []int{12, 13, 14, 15, 16}
 
 	for _, v := range versions {
-		ctx := context.Background()
+		ctx, cancel := context.WithCancel(context.Background())
 		c, conn := test.StartPG(t, ctx, test.StartPGOpts{
 			Version: v,
 		})
@@ -78,8 +78,10 @@ func TestMultipleConectionsFail(t *testing.T) {
 
 		r2, err := Postgres(ctx, opts)
 		err = r2.Pull(ctx, nil)
-		require.Error(t, err)
+		require.ErrorIs(t, err, ErrReplicationAlreadyRunning)
 
-		c.Stop(ctx, nil)
+		cancel()
+		timeout := time.Second
+		c.Stop(ctx, &timeout)
 	}
 }
