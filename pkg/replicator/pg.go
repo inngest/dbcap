@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -19,6 +20,9 @@ import (
 
 var (
 	ReadTimeout = time.Second * 5
+
+	ErrLogicalReplicationNotSetUp = fmt.Errorf("ERR_PG_001: Your database does not have logical replication configured.  You must set the WAL level to 'logical' to stream events.")
+	ErrReplicationSlotNotFound    = fmt.Errorf("ERR_PG_002: The replication slot 'inngest_cdc' doesn't exist in your database.  Please create the logical replication slot to stream events.")
 )
 
 type WatermarkCommitter interface {
@@ -119,7 +123,7 @@ func (p *pg) Commit(wm changeset.Watermark) {
 	atomic.StoreInt64(&p.lsnTime, wm.ServerTime.UnixNano())
 }
 
-func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
+func (p *pg) Connect(ctx context.Context, lsn pglogrepl.LSN) error {
 	identify, err := pglogrepl.IdentifySystem(ctx, p.conn)
 	if err != nil {
 		return fmt.Errorf("error identifying postgres: %w", err)
@@ -127,13 +131,8 @@ func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 
 	// By default, start at the current LSN, ie. the latest point in the stream.
 	startLSN := identify.XLogPos
-
-	if p.opts.WatermarkLoader != nil {
-		watermark, err := p.opts.WatermarkLoader(ctx)
-		if err != nil {
-			return fmt.Errorf("error loading watermark: %w", err)
-		}
-		startLSN = watermark.LSN
+	if lsn > 0 {
+		startLSN = lsn
 	}
 
 	err = pglogrepl.StartReplication(
@@ -147,8 +146,31 @@ func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 		},
 	)
 	if err != nil {
-		// XXX: Failure modes - what if the LSN is too far behind?
+		msg := err.Error()
+		if strings.Contains(msg, "logical decoding requires wal_level") {
+			return ErrLogicalReplicationNotSetUp
+		}
+		if strings.Contains(msg, fmt.Sprintf(`replication slot "%s" does not exist`, pgconsts.SlotName)) {
+			return ErrReplicationSlotNotFound
+		}
 		return fmt.Errorf("error starting logical replication: %w", err)
+	}
+	return nil
+}
+
+func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
+	// By default, start at the current LSN, ie. the latest point in the stream.
+	var startLSN pglogrepl.LSN
+	if p.opts.WatermarkLoader != nil {
+		watermark, err := p.opts.WatermarkLoader(ctx)
+		if err != nil {
+			return fmt.Errorf("error loading watermark: %w", err)
+		}
+		startLSN = watermark.LSN
+	}
+
+	if err := p.Connect(ctx, pglogrepl.LSN(startLSN)); err != nil {
+		return err
 	}
 
 	for {
