@@ -18,6 +18,9 @@ type StartPGOpts struct {
 	DisableLogicalReplication bool
 	DisableCreateRoles        bool
 	DisableCreateSlot         bool
+	// DisableReplicaIdentityFull disables replica identity full, skipping old tuples
+	// in updates.
+	DisableReplicaIdentityFull bool
 }
 
 func StartPG(t *testing.T, ctx context.Context, opts StartPGOpts) (tc.Container, pgx.ConnConfig) {
@@ -58,6 +61,15 @@ func StartPG(t *testing.T, ctx context.Context, opts StartPGOpts) (tc.Container,
 
 	err = createTables(ctx, conn)
 	require.NoError(t, err)
+
+	if !opts.DisableReplicaIdentityFull {
+		stmt := `
+		ALTER TABLE accounts REPLICA IDENTITY FULL;
+		ALTER TABLE users REPLICA IDENTITY FULL;`
+		dbres := conn.Exec(ctx, stmt)
+		err := dbres.Close()
+		require.NoError(t, err)
+	}
 
 	err = conn.Close(ctx)
 	require.NoError(t, err)
@@ -129,7 +141,6 @@ func createTables(ctx context.Context, c *pgconn.PgConn) error {
 		  created_at timestamp without time zone NOT NULL default now(),
 		  updated_at timestamp without time zone NOT NULL default now()
 		);
-		ALTER TABLE accounts REPLICA IDENTITY FULL;
 
 		CREATE TABLE users (
 		  id uuid DEFAULT public.gen_random_uuid() PRIMARY KEY NOT NULL,
@@ -142,7 +153,6 @@ func createTables(ctx context.Context, c *pgconn.PgConn) error {
 		  created_at timestamp without time zone NOT NULL default now(),
 		  updated_at timestamp without time zone NOT NULL default now()
 		);
-		ALTER TABLE users REPLICA IDENTITY FULL;
 	`
 	res := c.Exec(ctx, stmt)
 	if err := res.Close(); err != nil {

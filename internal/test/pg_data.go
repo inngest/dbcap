@@ -41,7 +41,7 @@ func InsertAccounts(t *testing.T, ctx context.Context, cfg pgx.ConnConfig, opts 
 
 	at := time.Unix(1725000000, 0)
 
-	rand.Seed(opts.Seed)
+	rand := rand.New(rand.NewSource(opts.Seed))
 
 	for i := 0; i < opts.Max; i++ {
 		id := hash(rand.Int63())
