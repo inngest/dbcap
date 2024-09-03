@@ -10,31 +10,20 @@ import (
 type Operation string
 
 const (
-	OperationBegin    = "BEGIN"
-	OperationCommit   = "COMMIT"
-	OperationInsert   = "INSERT"
-	OperationUpdate   = "UPDATE"
-	OperationDelete   = "DELETE"
-	OperationTruncate = "TRUNCATE"
+	OperationBegin    Operation = "BEGIN"
+	OperationCommit   Operation = "COMMIT"
+	OperationInsert   Operation = "INSERT"
+	OperationUpdate   Operation = "UPDATE"
+	OperationDelete   Operation = "DELETE"
+	OperationTruncate Operation = "TRUNCATE"
 )
 
-func (o Operation) ToEventVerb() string {
-	switch o {
-	case OperationBegin:
-		return "tx-began"
-	case OperationCommit:
-		return "tx-committed"
-	case OperationInsert:
-		return "inserted"
-	case OperationUpdate:
-		return "updated"
-	case OperationDelete:
-		return "deleted"
-	case OperationTruncate:
-		return "truncated"
-	default:
-		return strings.ToLower(string(o))
-	}
+// WatermarkCommitter is an interface that commits a given watermark to backing datastores.
+type WatermarkCommitter interface {
+	// Commit commits the current watermark across the backing datastores - remote
+	// and local.  Note that the remote may be committed at specific intervals,
+	// so no guarantee of an immediate commit is provided.
+	Commit(Watermark)
 }
 
 type Changeset struct {
@@ -82,4 +71,23 @@ type ColumnUpdate struct {
 	// Data is the value of the column.  If this is binary data, this data will be
 	// base64 encoded.
 	Data any `json:"data"`
+}
+
+func (o Operation) ToEventVerb() string {
+	switch o {
+	case OperationBegin:
+		return "tx-began"
+	case OperationCommit:
+		return "tx-committed"
+	case OperationInsert:
+		return "inserted"
+	case OperationUpdate:
+		return "updated"
+	case OperationDelete:
+		return "deleted"
+	case OperationTruncate:
+		return "truncated"
+	default:
+		return strings.ToLower(string(o))
+	}
 }

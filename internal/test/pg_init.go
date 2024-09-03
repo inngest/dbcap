@@ -56,8 +56,32 @@ func StartPG(t *testing.T, ctx context.Context, opts StartPGOpts) (tc.Container,
 		require.NoError(t, err)
 	}
 
+	err = createTables(ctx, conn)
 	require.NoError(t, err)
-	return c, connOpts(t, c)
+
+	err = conn.Close(ctx)
+	require.NoError(t, err)
+
+	// The CDC user always has an `inngest` username.
+	pgxConfig := connOpts(t, c)
+	pgxConfig.User = "inngest"
+	pgxConfig.Config.User = "inngest"
+
+	require.NoError(t, err)
+	return c, pgxConfig
+}
+
+func connString(t *testing.T, c tc.Container) string {
+	p, err := c.MappedPort(context.TODO(), "5432")
+	require.NoError(t, err)
+	port := strings.ReplaceAll(string(p), "/tcp", "")
+	return fmt.Sprintf("postgres://postgres:password@localhost:%s/db", port)
+}
+
+func connOpts(t *testing.T, c tc.Container) pgx.ConnConfig {
+	cfg, err := pgx.ParseConfig(connString(t, c))
+	require.NoError(t, err)
+	return *cfg
 }
 
 func prepareRoles(ctx context.Context, c *pgconn.PgConn) error {
@@ -87,15 +111,42 @@ func createReplicationSlot(ctx context.Context, c *pgconn.PgConn) error {
 	return nil
 }
 
-func connString(t *testing.T, c tc.Container) string {
-	p, err := c.MappedPort(context.TODO(), "5432")
-	require.NoError(t, err)
-	port := strings.ReplaceAll(string(p), "/tcp", "")
-	return fmt.Sprintf("postgres://postgres:password@localhost:%s/db", port)
-}
+func createTables(ctx context.Context, c *pgconn.PgConn) error {
+	stmt := `
+		CREATE EXTENSION IF NOT EXISTS "pgcrypto" WITH SCHEMA public;
 
-func connOpts(t *testing.T, c tc.Container) pgx.ConnConfig {
-	cfg, err := pgx.ParseConfig(connString(t, c))
-	require.NoError(t, err)
-	return *cfg
+		ALTER DATABASE postgres SET lock_timeout=5000;
+
+		CREATE TABLE accounts (
+		  id uuid DEFAULT public.gen_random_uuid() PRIMARY KEY NOT NULL,
+		  name varchar(255),
+		  billing_email varchar(255) NOT NULL,
+
+		  concurrency integer DEFAULT 0 NOT NULL,
+		  enabled boolean,
+		  metadata JSONB,
+
+		  created_at timestamp without time zone NOT NULL default now(),
+		  updated_at timestamp without time zone NOT NULL default now()
+		);
+		ALTER TABLE accounts REPLICA IDENTITY FULL;
+
+		CREATE TABLE users (
+		  id uuid DEFAULT public.gen_random_uuid() PRIMARY KEY NOT NULL,
+		  account_id uuid NOT NULL CONSTRAINT users_account_id REFERENCES accounts ON DELETE CASCADE,
+		  email varchar(255) NOT NULL UNIQUE,
+		  name varchar(255),
+
+		  metadata jsonb,
+
+		  created_at timestamp without time zone NOT NULL default now(),
+		  updated_at timestamp without time zone NOT NULL default now()
+		);
+		ALTER TABLE users REPLICA IDENTITY FULL;
+	`
+	res := c.Exec(ctx, stmt)
+	if err := res.Close(); err != nil {
+		return err
+	}
+	return nil
 }

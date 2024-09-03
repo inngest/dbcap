@@ -28,19 +28,12 @@ var (
 	ErrReplicationAlreadyRunning = fmt.Errorf("ERR_PG_901: Replication is already streaming events")
 )
 
-type WatermarkCommitter interface {
-	// Commit commits the current watermark across the backing datastores - remote
-	// and local.  Note that the remote may be committed at specific intervals,
-	// so no guarantee of an immediate commit is provided.
-	Commit(changeset.Watermark)
-}
-
 type Replicator interface {
 	// Pull is a blocking method which pulls changes from an external source,
 	// sending all found changesets on the given changeset channel.
 	Pull(context.Context, chan *changeset.Changeset) error
 
-	WatermarkCommitter
+	changeset.WatermarkCommitter
 }
 
 // PostgresWatermarker is a function which saves a given postgres changeset to storage.  This allows
@@ -64,7 +57,8 @@ type PostgresOpts struct {
 
 // Postgres returns a new postgres replicator for a single postgres database.
 func Postgres(ctx context.Context, opts PostgresOpts) (Replicator, error) {
-	cfg, _ := pgconn.ParseConfig(opts.Config.ConnString())
+	cfg := opts.Config
+
 	// Ensure that we add "replication": "database" as a to the replication
 	// configuration
 	replConfig := cfg.Copy()
@@ -76,7 +70,7 @@ func Postgres(ctx context.Context, opts PostgresOpts) (Replicator, error) {
 	// Connect using pgconn for replication.  This is a prerequisite, as
 	// replication uses different client connection parameters to enable specific
 	// postgres functionality.
-	conn, err := pgconn.ConnectConfig(ctx, replConfig)
+	replConn, err := pgx.ConnectConfig(ctx, replConfig)
 	if err != nil {
 		return nil, fmt.Errorf("error connecting to postgres host for replication: %w", err)
 	}
@@ -93,7 +87,7 @@ func Postgres(ctx context.Context, opts PostgresOpts) (Replicator, error) {
 	}
 
 	return &pg{
-		conn:    conn,
+		conn:    replConn.PgConn(),
 		decoder: decoder.NewV1LogicalDecoder(sl),
 	}, nil
 }
@@ -192,7 +186,9 @@ func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 			continue
 		}
 
-		cc <- changes
+		if cc != nil {
+			cc <- changes
+		}
 	}
 }
 
@@ -227,6 +223,10 @@ func (p *pg) fetch(ctx context.Context) (*changeset.Changeset, error) {
 
 	if errMsg, ok := rawMsg.(*pgproto3.ErrorResponse); ok {
 		return nil, fmt.Errorf("received pg wal error: %#v", errMsg)
+	}
+
+	if _, ok := rawMsg.(*pgproto3.CommandComplete); ok {
+		return nil, nil
 	}
 
 	msg, ok := rawMsg.(*pgproto3.CopyData)

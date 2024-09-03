@@ -39,13 +39,14 @@ func (v1LogicalDecoder) ReplicationPluginArgs() []string {
 	return []string{
 		"proto_version '1'",
 		fmt.Sprintf("publication_names '%s'", pgconsts.PublicationName),
-		// "messages 'true'", Doesn't work for v12 and v13.
+		// "messages 'true'", // Doesn't work for v12 and v13.
 	}
 }
 
 // Decode returns a boolean indicating
 func (v v1LogicalDecoder) Decode(in []byte, cs *changeset.Changeset) (bool, error) {
 	msgType := pglogrepl.MessageType(in[0])
+
 	switch msgType {
 	case pglogrepl.MessageTypeRelation:
 		// MessageTypeRelation describes the OIDs for any relation before DML messages are sent.  From the docs:
