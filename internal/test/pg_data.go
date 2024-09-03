@@ -14,6 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	DefaultSeed        = 123
+	DefaultAccountUUID = "6db2bd8a-2a2f-52d3-aa79-abb4015d6dbd"
+	DefaultEmail       = "lriai1h2oy1d@example.com"
+)
+
 type InsertOpts struct {
 	Seed int64
 
@@ -25,14 +31,25 @@ type InsertOpts struct {
 	ConnString *string
 }
 
+func DataConn(t *testing.T, cfg pgx.ConnConfig) *pgx.Conn {
+	// The data user always has the user 'postgres'
+	cfg.User = "postgres"
+	c, err := pgx.ConnectConfig(context.Background(), &cfg)
+	require.NoError(t, err)
+	return c
+}
+
 func InsertAccounts(t *testing.T, ctx context.Context, cfg pgx.ConnConfig, opts InsertOpts) {
 	t.Helper()
 
-	// The data user always has the user 'postgres
+	if opts.Seed == 0 {
+		opts.Seed = DefaultSeed
+	}
+
+	// The data user always has the user 'postgres'
 	cfg.User = "postgres"
 
-	c, err := pgx.ConnectConfig(ctx, &cfg)
-	require.NoError(t, err)
+	c := DataConn(t, cfg)
 	defer c.Close(ctx)
 
 	if opts.Max == 0 {

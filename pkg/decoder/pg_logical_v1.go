@@ -168,7 +168,7 @@ func (v v1LogicalDecoder) mutateChangeset(in pglogrepl.Message, cs *changeset.Ch
 			}
 		}
 		if msg.NewTuple != nil {
-			cs.Data.New, err = v.parseTuple(msg.OldTuple, rel)
+			cs.Data.New, err = v.parseTuple(msg.NewTuple, rel)
 			if err != nil {
 				v.log.Error("error parsing new tuple",
 					"operation", "insert",
