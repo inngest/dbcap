@@ -181,7 +181,7 @@ func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 
 	for {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return nil
 		}
 
 		changes, err := p.fetch(ctx)

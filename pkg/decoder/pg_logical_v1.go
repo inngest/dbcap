@@ -39,7 +39,7 @@ func (v1LogicalDecoder) ReplicationPluginArgs() []string {
 	return []string{
 		"proto_version '1'",
 		fmt.Sprintf("publication_names '%s'", pgconsts.PublicationName),
-		"messages 'true'",
+		// "messages 'true'", Doesn't work for v12 and v13.
 	}
 }
 

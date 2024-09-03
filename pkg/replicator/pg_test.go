@@ -54,7 +54,9 @@ func TestConnectingWithoutReplicationSlotFails(t *testing.T) {
 }
 
 func TestMultipleConectionsFail(t *testing.T) {
+	// NOTE: This doesn't work with PG <= 13
 	versions := []int{12, 13, 14, 15, 16}
+	// versions := []int{14, 15, 16}
 
 	for _, v := range versions {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -76,11 +78,16 @@ func TestMultipleConectionsFail(t *testing.T) {
 			require.NoError(t, err)
 		}()
 
+		<-time.After(50 * time.Millisecond)
+
 		r2, err := Postgres(ctx, opts)
 		err = r2.Pull(ctx, nil)
 		require.ErrorIs(t, err, ErrReplicationAlreadyRunning)
 
 		cancel()
+
+		<-time.After(time.Second)
+
 		timeout := time.Second
 		c.Stop(ctx, &timeout)
 	}
