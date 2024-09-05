@@ -11,8 +11,69 @@ import (
 	"github.com/inngest/pgcap/internal/test"
 	"github.com/inngest/pgcap/pkg/changeset"
 	"github.com/inngest/pgcap/pkg/eventwriter"
+	"github.com/jackc/pglogrepl"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
+
+//
+// WAL reporting
+//
+
+func TestCommit(t *testing.T) {
+	t.Parallel()
+	versions := []int{10, 11, 12, 13, 14, 15, 16}
+
+	for _, version := range versions {
+		v := version // loop capture
+		t.Run("It updates the WAL LSN in Postgres", func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithCancel(context.Background())
+
+			c, cfg := test.StartPG(t, ctx, test.StartPGOpts{Version: v})
+			r, err := Postgres(ctx, PostgresOpts{Config: cfg})
+			require.NoError(t, err)
+
+			// connect to read data
+			pg, err := pgx.ConnectConfig(ctx, &cfg)
+
+			// Set up event writer which listens to changes
+			var latestReceivedLSN pglogrepl.LSN
+			cb := eventwriter.NewCallbackWriter(ctx, func(cs *changeset.Changeset) {
+				latestReceivedLSN = cs.Watermark.LSN
+			})
+			csChan := cb.Listen(ctx, r)
+			// Star the replicator which forwards to our event writer
+			go func() {
+				err := r.Pull(ctx, csChan)
+				require.NoError(t, err)
+			}()
+
+			replSlotStart, err := ReplicationSlotData(ctx, pg)
+			require.NoError(t, err)
+			require.NotEqual(t, replSlotStart.ConfirmedFlushLSN, 0)
+
+			// Insert accounts every second
+			go test.InsertAccounts(t, ctx, cfg, test.InsertOpts{
+				Max:      100,
+				Interval: time.Second,
+			})
+
+			<-time.After(CommitInterval + time.Second)
+
+			replSlotEnd, err := ReplicationSlotData(ctx, pg)
+			require.NoError(t, err)
+			require.NotEqual(t, replSlotStart.ConfirmedFlushLSN, replSlotEnd.ConfirmedFlushLSN)
+			require.True(t, replSlotStart.ConfirmedFlushLSN < replSlotEnd.ConfirmedFlushLSN)
+			// require.Equal(t, latestReceivedLSN, replSlotEnd.ConfirmedFlushLSN)
+
+			_ = latestReceivedLSN
+			cancel()
+			require.NoError(t, c.Stop(context.Background(), nil))
+		})
+	}
+}
 
 //
 // Simple cases

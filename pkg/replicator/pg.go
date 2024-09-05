@@ -19,7 +19,8 @@ import (
 )
 
 var (
-	ReadTimeout = time.Second * 5
+	ReadTimeout    = time.Second * 5
+	CommitInterval = time.Second * 5
 
 	ErrLogicalReplicationNotSetUp = fmt.Errorf("ERR_PG_001: Your database does not have logical replication configured.  You must set the WAL level to 'logical' to stream events.")
 
@@ -87,7 +88,7 @@ func Postgres(ctx context.Context, opts PostgresOpts) (Replicator, error) {
 	}
 
 	return &pg{
-		conn:    replConn.PgConn(),
+		conn:    replConn,
 		decoder: decoder.NewV1LogicalDecoder(sl),
 	}, nil
 }
@@ -97,7 +98,7 @@ type pg struct {
 	opts PostgresOpts
 
 	// conn is the WAL connection
-	conn *pgconn.PgConn
+	conn *pgx.Conn
 	// decoder decodes the binary WAL log
 	decoder decoder.Decoder
 	// nextReportTime records the time in which we must next report the current
@@ -121,20 +122,20 @@ func (p *pg) Commit(wm changeset.Watermark) {
 }
 
 func (p *pg) Connect(ctx context.Context, lsn pglogrepl.LSN) error {
-	identify, err := pglogrepl.IdentifySystem(ctx, p.conn)
+	// By default, start at the current LSN, ie. the latest point in the stream.
+	startLSN, err := p.serverLSN(ctx)
 	if err != nil {
-		return fmt.Errorf("error identifying postgres: %w", err)
+		return fmt.Errorf("error fetching server LSN: %w", err)
 	}
 
-	// By default, start at the current LSN, ie. the latest point in the stream.
-	startLSN := identify.XLogPos
+	// And if we've got an LSN provided, use that.
 	if lsn > 0 {
 		startLSN = lsn
 	}
 
 	err = pglogrepl.StartReplication(
 		ctx,
-		p.conn,
+		p.conn.PgConn(),
 		pgconsts.SlotName,
 		startLSN,
 		pglogrepl.StartReplicationOptions{
@@ -204,12 +205,12 @@ func (p *pg) fetch(ctx context.Context) (*changeset.Changeset, error) {
 			if err = p.report(ctx, p.nextReportTime.IsZero()); err != nil {
 				p.log.Error("error reporting lsn progress", "error", err)
 			}
-			p.nextReportTime = time.Now().Add(5 * time.Second)
+			p.nextReportTime = time.Now().Add(CommitInterval)
 		}
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), ReadTimeout)
-	rawMsg, err := p.conn.ReceiveMessage(ctx)
+	rawMsg, err := p.conn.PgConn().ReceiveMessage(ctx)
 	cancel()
 
 	if err != nil {
@@ -273,6 +274,16 @@ func (p *pg) fetch(ctx context.Context) (*changeset.Changeset, error) {
 	return nil, nil
 }
 
+func (p *pg) serverLSN(ctx context.Context) (pglogrepl.LSN, error) {
+	identify, err := pglogrepl.IdentifySystem(ctx, p.conn.PgConn())
+	if err != nil {
+		return pglogrepl.LSN(0), fmt.Errorf("error identifying postgres: %w", err)
+	}
+
+	// By default, start at the current LSN, ie. the latest point in the stream.
+	return identify.XLogPos, nil
+}
+
 func (p *pg) committedWatermark() (wm changeset.Watermark) {
 	lsn, nano := atomic.LoadUint64(&p.lsn), atomic.LoadInt64(&p.lsnTime)
 	return changeset.Watermark{
@@ -296,7 +307,7 @@ func (p *pg) report(ctx context.Context, forceReply bool) error {
 		return nil
 	}
 	err := pglogrepl.SendStandbyStatusUpdate(ctx,
-		p.conn,
+		p.conn.PgConn(),
 		pglogrepl.StandbyStatusUpdate{
 			WALWritePosition: lsn,
 			ReplyRequested:   forceReply,
@@ -321,4 +332,25 @@ func copySlice(in []byte) []byte {
 	out := make([]byte, len(in))
 	copy(out, in)
 	return out
+}
+
+type ReplicationSlot struct {
+	Active            bool
+	RestartLSN        pglogrepl.LSN
+	ConfirmedFlushLSN pglogrepl.LSN
+	WALStatus         string
+}
+
+func ReplicationSlotData(ctx context.Context, conn *pgx.Conn) (ReplicationSlot, error) {
+	ret := ReplicationSlot{}
+	row := conn.QueryRow(
+		ctx,
+		fmt.Sprintf(`SELECT
+			active, restart_lsn, confirmed_flush_lsn, wal_status
+			FROM pg_replication_slots WHERE slot_name = '%s';`,
+			pgconsts.SlotName,
+		),
+	)
+	err := row.Scan(&ret.Active, &ret.RestartLSN, &ret.ConfirmedFlushLSN, &ret.WALStatus)
+	return ret, err
 }
