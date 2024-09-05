@@ -2,6 +2,7 @@ package test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"strconv"
@@ -78,7 +79,9 @@ func InsertAccounts(t *testing.T, ctx context.Context, cfg pgx.ConnConfig, opts 
 			at,
 		)
 
-		require.NoError(t, err)
+		if !errors.Is(err, context.Canceled) {
+			require.NoError(t, err)
+		}
 		rows.Close()
 		if opts.Interval > 0 {
 			<-time.After(opts.Interval)

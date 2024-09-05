@@ -338,7 +338,6 @@ type ReplicationSlot struct {
 	Active            bool
 	RestartLSN        pglogrepl.LSN
 	ConfirmedFlushLSN pglogrepl.LSN
-	WALStatus         string
 }
 
 func ReplicationSlotData(ctx context.Context, conn *pgx.Conn) (ReplicationSlot, error) {
@@ -346,11 +345,11 @@ func ReplicationSlotData(ctx context.Context, conn *pgx.Conn) (ReplicationSlot, 
 	row := conn.QueryRow(
 		ctx,
 		fmt.Sprintf(`SELECT
-			active, restart_lsn, confirmed_flush_lsn, wal_status
+			active, restart_lsn, confirmed_flush_lsn
 			FROM pg_replication_slots WHERE slot_name = '%s';`,
 			pgconsts.SlotName,
 		),
 	)
-	err := row.Scan(&ret.Active, &ret.RestartLSN, &ret.ConfirmedFlushLSN, &ret.WALStatus)
+	err := row.Scan(&ret.Active, &ret.RestartLSN, &ret.ConfirmedFlushLSN)
 	return ret, err
 }
