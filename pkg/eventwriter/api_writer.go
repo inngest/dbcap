@@ -2,17 +2,17 @@ package eventwriter
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/inngest/inngestgo"
 	"github.com/inngest/pgcap/pkg/changeset"
 )
 
 func NewAPIClientWriter(
 	ctx context.Context,
-	client any,
+	client inngestgo.Client,
 	batchSize int,
 ) EventWriter {
 	cs := make(chan *changeset.Changeset, batchSize)
@@ -43,7 +43,7 @@ func ChangesetToEvent(cs changeset.Changeset) map[string]any {
 }
 
 type apiWriter struct {
-	client    any
+	client    inngestgo.Client
 	cs        chan *changeset.Changeset
 	batchSize int
 
@@ -124,7 +124,7 @@ func (a *apiWriter) send(batch []*changeset.Changeset) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	evts := make([]map[string]any, len(batch))
+	evts := make([]any, len(batch))
 	for i, cs := range batch {
 		if cs == nil {
 			evts = evts[0:i]
@@ -137,12 +137,6 @@ func (a *apiWriter) send(batch []*changeset.Changeset) error {
 		return nil
 	}
 
-	byt, _ := json.MarshalIndent(evts, "", "  ")
-	fmt.Println(string(byt))
-	fmt.Println(len(evts))
-
-	// TODO: send events using an inngestgo client
-	_ = ctx
-
-	return nil
+	_, err := a.client.SendMany(ctx, evts)
+	return err
 }
