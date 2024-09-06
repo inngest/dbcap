@@ -2,6 +2,8 @@ package replicator
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -29,15 +31,21 @@ var (
 	ErrReplicationAlreadyRunning = fmt.Errorf("ERR_PG_901: Replication is already streaming events")
 )
 
-type Replicator interface {
-	// Pull is a blocking method which pulls changes from an external source,
-	// sending all found changesets on the given changeset channel.
-	Pull(context.Context, chan *changeset.Changeset) error
+// PostgresReplicator is a Replicator with added postgres functionality.
+type PostgresReplicator interface {
+	Replicator
 
-	changeset.WatermarkCommitter
+	// ServerLSN reports the server LSN
+	ServerLSN(ctx context.Context) (pglogrepl.LSN, error)
+
+	// ReplicationSlot returns the replication slot data or an error.
+	ReplicationSlot(ctx context.Context) (ReplicationSlot, error)
+
+	// Close closes all DB conns
+	Close(ctx context.Context) error
 }
 
-// PostgresWatermarker is a function which saves a given postgres changeset to storage.  This allows
+// PostgresWatermarker is a function which saves a given postgres changeset to local storage.  This allows
 // us to continue picking up from where the stream left off if services restart.
 type PostgresWatermarkSaver func(ctx context.Context, watermark changeset.Watermark) error
 
@@ -57,7 +65,7 @@ type PostgresOpts struct {
 }
 
 // Postgres returns a new postgres replicator for a single postgres database.
-func Postgres(ctx context.Context, opts PostgresOpts) (Replicator, error) {
+func Postgres(ctx context.Context, opts PostgresOpts) (PostgresReplicator, error) {
 	cfg := opts.Config
 
 	// Ensure that we add "replication": "database" as a to the replication
@@ -88,8 +96,9 @@ func Postgres(ctx context.Context, opts PostgresOpts) (Replicator, error) {
 	}
 
 	return &pg{
-		conn:    replConn,
-		decoder: decoder.NewV1LogicalDecoder(sl),
+		conn:      replConn,
+		queryConn: pgxc,
+		decoder:   decoder.NewV1LogicalDecoder(sl),
 	}, nil
 }
 
@@ -97,8 +106,13 @@ type pg struct {
 	// opts stores the initialization opts, including watermark functs
 	opts PostgresOpts
 
-	// conn is the WAL connection
+	// conn is the WAL streaming connection.  Once replication starts, this
+	// conn cannot be used for any queries.
 	conn *pgx.Conn
+
+	// queryCon is a conn for querying data.
+	queryConn *pgx.Conn
+
 	// decoder decodes the binary WAL log
 	decoder decoder.Decoder
 	// nextReportTime records the time in which we must next report the current
@@ -112,6 +126,16 @@ type pg struct {
 	log *slog.Logger
 }
 
+func (p *pg) Close(ctx context.Context) error {
+	_ = p.conn.Close(ctx)
+	_ = p.queryConn.Close(ctx)
+	return nil
+}
+
+func (p *pg) ReplicationSlot(ctx context.Context) (ReplicationSlot, error) {
+	return ReplicationSlotData(ctx, p.queryConn)
+}
+
 // Commit commits the current watermark into the postgres replicator.  The postgres replicator
 // will transmit the committed LSN to the remote server at the next interval (or on shutdown),
 // and will save the committed watermark to local state via the PostgresWatermarkSaver function
@@ -123,7 +147,7 @@ func (p *pg) Commit(wm changeset.Watermark) {
 
 func (p *pg) Connect(ctx context.Context, lsn pglogrepl.LSN) error {
 	// By default, start at the current LSN, ie. the latest point in the stream.
-	startLSN, err := p.serverLSN(ctx)
+	startLSN, err := p.ServerLSN(ctx)
 	if err != nil {
 		return fmt.Errorf("error fetching server LSN: %w", err)
 	}
@@ -274,7 +298,7 @@ func (p *pg) fetch(ctx context.Context) (*changeset.Changeset, error) {
 	return nil, nil
 }
 
-func (p *pg) serverLSN(ctx context.Context) (pglogrepl.LSN, error) {
+func (p *pg) ServerLSN(ctx context.Context) (pglogrepl.LSN, error) {
 	identify, err := pglogrepl.IdentifySystem(ctx, p.conn.PgConn())
 	if err != nil {
 		return pglogrepl.LSN(0), fmt.Errorf("error identifying postgres: %w", err)
@@ -351,5 +375,8 @@ func ReplicationSlotData(ctx context.Context, conn *pgx.Conn) (ReplicationSlot, 
 		),
 	)
 	err := row.Scan(&ret.Active, &ret.RestartLSN, &ret.ConfirmedFlushLSN)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ret, ErrReplicationSlotNotFound
+	}
 	return ret, err
 }

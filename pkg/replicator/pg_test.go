@@ -12,7 +12,6 @@ import (
 	"github.com/inngest/pgcap/pkg/changeset"
 	"github.com/inngest/pgcap/pkg/eventwriter"
 	"github.com/jackc/pglogrepl"
-	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,9 +34,6 @@ func TestCommit(t *testing.T) {
 			r, err := Postgres(ctx, PostgresOpts{Config: cfg})
 			require.NoError(t, err)
 
-			// connect to read data
-			pg, err := pgx.ConnectConfig(ctx, &cfg)
-
 			// Set up event writer which listens to changes
 			var latestReceivedLSN pglogrepl.LSN
 			cb := eventwriter.NewCallbackWriter(ctx, func(cs *changeset.Changeset) {
@@ -50,7 +46,7 @@ func TestCommit(t *testing.T) {
 				require.NoError(t, err)
 			}()
 
-			replSlotStart, err := ReplicationSlotData(ctx, pg)
+			replSlotStart, err := r.ReplicationSlot(ctx)
 			require.NoError(t, err)
 			require.NotEqual(t, replSlotStart.ConfirmedFlushLSN, 0)
 
@@ -62,7 +58,7 @@ func TestCommit(t *testing.T) {
 
 			<-time.After(CommitInterval + time.Second)
 
-			replSlotEnd, err := ReplicationSlotData(ctx, pg)
+			replSlotEnd, err := r.ReplicationSlot(ctx)
 			require.NoError(t, err)
 			require.NotEqual(t, replSlotStart.ConfirmedFlushLSN, replSlotEnd.ConfirmedFlushLSN)
 			require.True(t, replSlotStart.ConfirmedFlushLSN < replSlotEnd.ConfirmedFlushLSN)
