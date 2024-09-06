@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -59,9 +60,16 @@ type PostgresWatermarkLoader func(ctx context.Context) (*changeset.Watermark, er
 
 type PostgresOpts struct {
 	Config pgx.ConnConfig
-
-	WatermarkSaver  PostgresWatermarkSaver
+	// WatermarkSaver saves the current watermark to local storage.  This should be paired with a
+	// WatermarkLoader to load offsets when the replicator restarts.
+	WatermarkSaver PostgresWatermarkSaver
+	// WatermarkLoader, if specified, loads watermarks for the given connection to start replication
+	// from a given offset.  If this isn't specified, replication will start from the latest point in
+	// the Postgres server's WAL.
 	WatermarkLoader PostgresWatermarkLoader
+	// Log, if specified, is the stdlib logger used to log debug and warning messages during
+	// replication.
+	Log *slog.Logger
 }
 
 // Postgres returns a new postgres replicator for a single postgres database.
@@ -95,6 +103,12 @@ func Postgres(ctx context.Context, opts PostgresOpts) (PostgresReplicator, error
 		return nil, err
 	}
 
+	if opts.Log == nil {
+		opts.Log = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}))
+	}
+
 	return &pg{
 		conn:      replConn,
 		queryConn: pgxc,
@@ -105,14 +119,11 @@ func Postgres(ctx context.Context, opts PostgresOpts) (PostgresReplicator, error
 type pg struct {
 	// opts stores the initialization opts, including watermark functs
 	opts PostgresOpts
-
 	// conn is the WAL streaming connection.  Once replication starts, this
 	// conn cannot be used for any queries.
 	conn *pgx.Conn
-
 	// queryCon is a conn for querying data.
 	queryConn *pgx.Conn
-
 	// decoder decodes the binary WAL log
 	decoder decoder.Decoder
 	// nextReportTime records the time in which we must next report the current
@@ -122,7 +133,7 @@ type pg struct {
 	lsn uint64
 	// lsnTime is the server time for the LSN, stored as a uint64 nanosecond epoch.
 	lsnTime int64
-
+	// log is a stdlib logger for reporting debug and warn logs.
 	log *slog.Logger
 }
 
