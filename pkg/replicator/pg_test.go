@@ -16,6 +16,55 @@ import (
 )
 
 //
+
+func TestReplicationSlot(t *testing.T) {
+	t.Run("Without logical replication", func(t *testing.T) {
+		t.Parallel()
+		versions := []int{10, 11, 12, 13, 14, 15, 16}
+
+		for _, version := range versions {
+			v := version // loop capture
+			t.Run("It errors if not in logical replication", func(t *testing.T) {
+				t.Parallel()
+				ctx := context.Background()
+
+				c, cfg := test.StartPG(t, ctx, test.StartPGOpts{
+					Version:                   v,
+					DisableLogicalReplication: true,
+					DisableCreateSlot:         true,
+				})
+
+				r, err := Postgres(ctx, PostgresOpts{Config: cfg})
+				require.NoError(t, err)
+
+				_, err = r.ReplicationSlot(ctx)
+				require.ErrorIs(t, err, ErrLogicalReplicationNotSetUp)
+
+				c.Stop(ctx, nil)
+			})
+
+			t.Run("It errors if slot not found", func(t *testing.T) {
+				t.Parallel()
+				ctx := context.Background()
+
+				c, cfg := test.StartPG(t, ctx, test.StartPGOpts{
+					Version:           v,
+					DisableCreateSlot: true,
+				})
+
+				r, err := Postgres(ctx, PostgresOpts{Config: cfg})
+				require.NoError(t, err)
+
+				_, err = r.ReplicationSlot(ctx)
+				require.ErrorIs(t, err, ErrReplicationSlotNotFound)
+
+				c.Stop(ctx, nil)
+			})
+		}
+	})
+}
+
+//
 // WAL reporting
 //
 

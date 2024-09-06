@@ -36,11 +36,14 @@ var (
 type PostgresReplicator interface {
 	Replicator
 
+	// ReplicationSlot returns the replication slot data or an error.
+	//
+	// If ReplicationSlot does not return an error, it's safe to assume that the
+	// postgres database is correctly configured.
+	ReplicationSlot(ctx context.Context) (ReplicationSlot, error)
+
 	// ServerLSN reports the server LSN
 	ServerLSN(ctx context.Context) (pglogrepl.LSN, error)
-
-	// ReplicationSlot returns the replication slot data or an error.
-	ReplicationSlot(ctx context.Context) (ReplicationSlot, error)
 
 	// Close closes all DB conns
 	Close(ctx context.Context) error
@@ -144,6 +147,14 @@ func (p *pg) Close(ctx context.Context) error {
 }
 
 func (p *pg) ReplicationSlot(ctx context.Context) (ReplicationSlot, error) {
+	mode, err := p.walMode(ctx)
+	if err != nil {
+		return ReplicationSlot{}, err
+	}
+	if mode != "logical" {
+		return ReplicationSlot{}, ErrLogicalReplicationNotSetUp
+	}
+
 	return ReplicationSlotData(ctx, p.queryConn)
 }
 
@@ -179,15 +190,8 @@ func (p *pg) Connect(ctx context.Context, lsn pglogrepl.LSN) error {
 		},
 	)
 	if err != nil {
-		msg := err.Error()
-		if strings.Contains(msg, "logical decoding requires wal_level") {
-			return ErrLogicalReplicationNotSetUp
-		}
-		if strings.Contains(msg, fmt.Sprintf(`replication slot "%s" does not exist`, pgconsts.SlotName)) {
-			return ErrReplicationSlotNotFound
-		}
-		if strings.Contains(msg, fmt.Sprintf(`replication slot "%s" is active`, pgconsts.SlotName)) {
-			return ErrReplicationAlreadyRunning
+		if converted, newErr := standardizeErr(err); converted {
+			return newErr
 		}
 		return fmt.Errorf("error starting logical replication: %w", err)
 	}
@@ -312,6 +316,9 @@ func (p *pg) fetch(ctx context.Context) (*changeset.Changeset, error) {
 func (p *pg) ServerLSN(ctx context.Context) (pglogrepl.LSN, error) {
 	identify, err := pglogrepl.IdentifySystem(ctx, p.conn.PgConn())
 	if err != nil {
+		if converted, err := standardizeErr(err); converted {
+			return pglogrepl.LSN(0), err
+		}
 		return pglogrepl.LSN(0), fmt.Errorf("error identifying postgres: %w", err)
 	}
 
@@ -362,6 +369,13 @@ func (p *pg) LSN() (lsn pglogrepl.LSN) {
 	return pglogrepl.LSN(atomic.LoadUint64(&p.lsn))
 }
 
+func (p *pg) walMode(ctx context.Context) (string, error) {
+	var mode string
+	row := p.queryConn.QueryRow(ctx, "SHOW wal_level")
+	err := row.Scan(&mode)
+	return mode, err
+}
+
 // copySlice is a util for copying a slice.
 func copySlice(in []byte) []byte {
 	out := make([]byte, len(in))
@@ -386,8 +400,23 @@ func ReplicationSlotData(ctx context.Context, conn *pgx.Conn) (ReplicationSlot, 
 		),
 	)
 	err := row.Scan(&ret.Active, &ret.RestartLSN, &ret.ConfirmedFlushLSN)
-	if errors.Is(err, sql.ErrNoRows) {
+	// pgx has its own ErrNoRows :(
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
 		return ret, ErrReplicationSlotNotFound
 	}
 	return ret, err
+}
+
+func standardizeErr(err error) (bool, error) {
+	msg := err.Error()
+	if strings.Contains(msg, "logical decoding requires wal_level") {
+		return true, ErrLogicalReplicationNotSetUp
+	}
+	if strings.Contains(msg, fmt.Sprintf(`replication slot "%s" does not exist`, pgconsts.SlotName)) {
+		return true, ErrReplicationSlotNotFound
+	}
+	if strings.Contains(msg, fmt.Sprintf(`replication slot "%s" is active`, pgconsts.SlotName)) {
+		return true, ErrReplicationAlreadyRunning
+	}
+	return false, err
 }
