@@ -126,6 +126,12 @@ type pg struct {
 	lsnTime int64
 	// log is a stdlib logger for reporting debug and warn logs.
 	log *slog.Logger
+
+	stopped int32
+}
+
+func (p *pg) Stop() {
+	atomic.StoreInt32(&p.stopped, 1)
 }
 
 func (p *pg) Close(ctx context.Context) error {
@@ -207,7 +213,9 @@ func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 	}
 
 	for {
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || atomic.LoadInt32(&p.stopped) == 1 {
+			// Always call Close automatically.
+			p.Close(ctx)
 			return nil
 		}
 

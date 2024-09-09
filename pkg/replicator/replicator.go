@@ -21,7 +21,17 @@ type WatermarkLoader func(ctx context.Context) (*changeset.Watermark, error)
 type Replicator interface {
 	// Pull is a blocking method which pulls changes from an external source,
 	// sending all found changesets on the given changeset channel.
+	//
+	// Pull blocks until the context is cancelled, or until Stop() is called.
+	//
+	// When Pull terminates from a cancelled context or via calling Stop(), the
+	// DB connections to the endpoint will automatically be closed in the
+	// underlying implementation.
 	Pull(context.Context, chan *changeset.Changeset) error
+
+	// Stop stops pulling and shuts down the replicator.  This is an alternative
+	// to cancelling the context passed into Pull.
+	Stop()
 
 	// TestConnection tests the replicator connection, returning an error if the
 	// connection or DB configuration is invalid.
