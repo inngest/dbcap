@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/inngest/pgcap/pkg/changeset"
-	"github.com/inngest/pgcap/pkg/eventwriter"
-	"github.com/inngest/pgcap/pkg/replicator"
+	"github.com/inngest/dbcap/pkg/changeset"
+	"github.com/inngest/dbcap/pkg/eventwriter"
+	"github.com/inngest/dbcap/pkg/replicator"
 	"github.com/jackc/pgx/v5"
 )
 
