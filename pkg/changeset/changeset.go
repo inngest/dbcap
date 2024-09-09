@@ -38,7 +38,14 @@ type Changeset struct {
 }
 
 type Watermark struct {
-	LSN        pglogrepl.LSN
+	PostgresWatermark `json:"pg"`
+}
+
+type PostgresWatermark struct {
+	// LSN is a Postgres-specific watermark.
+	LSN pglogrepl.LSN
+	// ServerTime is the optional server time of the watermark.  This is
+	// always provided with Postgres watermarks.
 	ServerTime time.Time
 }
 

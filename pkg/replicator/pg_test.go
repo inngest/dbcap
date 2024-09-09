@@ -15,8 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-//
-
 func TestReplicationSlot(t *testing.T) {
 	t.Run("Without logical replication", func(t *testing.T) {
 		t.Parallel()

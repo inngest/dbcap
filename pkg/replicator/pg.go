@@ -49,27 +49,15 @@ type PostgresReplicator interface {
 	Close(ctx context.Context) error
 }
 
-// PostgresWatermarker is a function which saves a given postgres changeset to local storage.  This allows
-// us to continue picking up from where the stream left off if services restart.
-type PostgresWatermarkSaver func(ctx context.Context, watermark changeset.Watermark) error
-
-// PostgresWatermarkLoader is a function which loads a postgres watermark for the given database connection.
-//
-// If this returns nil, we will use the current DB LSN as the starting point, ie. using the latest available
-// stream data.
-//
-// If this returns an error the CDC replicator will fail early.
-type PostgresWatermarkLoader func(ctx context.Context) (*changeset.Watermark, error)
-
 type PostgresOpts struct {
 	Config pgx.ConnConfig
 	// WatermarkSaver saves the current watermark to local storage.  This should be paired with a
 	// WatermarkLoader to load offsets when the replicator restarts.
-	WatermarkSaver PostgresWatermarkSaver
+	WatermarkSaver WatermarkSaver
 	// WatermarkLoader, if specified, loads watermarks for the given connection to start replication
 	// from a given offset.  If this isn't specified, replication will start from the latest point in
 	// the Postgres server's WAL.
-	WatermarkLoader PostgresWatermarkLoader
+	WatermarkLoader WatermarkLoader
 	// Log, if specified, is the stdlib logger used to log debug and warning messages during
 	// replication.
 	Log *slog.Logger
@@ -294,8 +282,10 @@ func (p *pg) fetch(ctx context.Context) (*changeset.Changeset, error) {
 			Watermark: changeset.Watermark{
 				// NOTE: It's expected that WALStart and ServerWALEnd
 				// are the same.
-				LSN:        xld.WALStart,
-				ServerTime: xld.ServerTime,
+				PostgresWatermark: changeset.PostgresWatermark{
+					LSN:        xld.WALStart,
+					ServerTime: xld.ServerTime,
+				},
 			},
 		}
 
@@ -329,8 +319,10 @@ func (p *pg) ServerLSN(ctx context.Context) (pglogrepl.LSN, error) {
 func (p *pg) committedWatermark() (wm changeset.Watermark) {
 	lsn, nano := atomic.LoadUint64(&p.lsn), atomic.LoadInt64(&p.lsnTime)
 	return changeset.Watermark{
-		LSN:        pglogrepl.LSN(lsn),
-		ServerTime: time.Unix(0, nano),
+		PostgresWatermark: changeset.PostgresWatermark{
+			LSN:        pglogrepl.LSN(lsn),
+			ServerTime: time.Unix(0, nano),
+		},
 	}
 }
 
