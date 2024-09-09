@@ -52,8 +52,8 @@ type PostgresWatermark struct {
 type Data struct {
 	// TransactionLSN represents the last LSN of a transaction.
 	// No
-	TxnLSN        uint32    `json:"txn_id,omitempty"`
-	TxnCommitTime time.Time `json:"txn_commit_time,omitempty"`
+	TxnLSN        uint32     `json:"txn_id,omitempty"`
+	TxnCommitTime *time.Time `json:"txn_commit_time,omitempty"`
 
 	Table string       `json:"table,omitempty"`
 	Old   UpdateTuples `json:"old,omitempty"`

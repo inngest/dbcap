@@ -95,13 +95,13 @@ func (v v1LogicalDecoder) mutateChangeset(in pglogrepl.Message, cs *changeset.Ch
 	case *pglogrepl.BeginMessage:
 		cs.Operation = changeset.OperationBegin
 		cs.Data.TxnLSN = uint32(msg.FinalLSN)
-		cs.Data.TxnCommitTime = msg.CommitTime
+		cs.Data.TxnCommitTime = &msg.CommitTime
 		return nil
 
 	case *pglogrepl.CommitMessage:
 		cs.Operation = changeset.OperationCommit
 		cs.Data.TxnLSN = uint32(msg.CommitLSN)
-		cs.Data.TxnCommitTime = msg.CommitTime
+		cs.Data.TxnCommitTime = &msg.CommitTime
 		return nil
 
 	case *pglogrepl.TruncateMessage:
