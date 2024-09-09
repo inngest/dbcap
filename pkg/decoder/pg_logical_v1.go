@@ -108,8 +108,8 @@ func (v v1LogicalDecoder) mutateChangeset(in pglogrepl.Message, cs *changeset.Ch
 		cs.Operation = changeset.OperationTruncate
 		cs.Data.TruncatedTables = []string{}
 		for _, id := range msg.RelationIDs {
-			rel, _ := v.relations[id]
-			if rel == nil {
+			rel, ok := v.relations[id]
+			if !ok || rel == nil {
 				return fmt.Errorf("couldn't find relation for truncate in relation OID: %d", id)
 			}
 			cs.Data.TruncatedTables = append(cs.Data.TruncatedTables, rel.RelationName)
@@ -206,8 +206,8 @@ func (v v1LogicalDecoder) mutateChangeset(in pglogrepl.Message, cs *changeset.Ch
 func (v v1LogicalDecoder) findRelationByOID(oid uint32) (*pglogrepl.RelationMessage, error) {
 	// PG always sends a RelationMessage before DMLs, so we can grab table information
 	// here and this should _always_ be present.
-	rel, _ := v.relations[oid]
-	if rel == nil {
+	rel, ok := v.relations[oid]
+	if !ok || rel == nil {
 		v.log.Warn("no relation found for oid", "oid", oid)
 		return nil, fmt.Errorf("couldn't find relation in decoder: %d", oid)
 	}

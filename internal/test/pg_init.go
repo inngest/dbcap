@@ -42,6 +42,7 @@ func StartPG(t *testing.T, ctx context.Context, opts StartPGOpts) (tc.Container,
 		fmt.Sprintf("docker.io/postgres:%d-alpine", opts.Version),
 		args...,
 	)
+	require.NoError(t, err)
 
 	conn, err := pgconn.Connect(ctx, connString(t, c))
 	if err != nil {

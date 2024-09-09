@@ -38,7 +38,7 @@ func TestReplicationSlot(t *testing.T) {
 				_, err = r.ReplicationSlot(ctx)
 				require.ErrorIs(t, err, ErrLogicalReplicationNotSetUp)
 
-				c.Stop(ctx, nil)
+				_ = c.Stop(ctx, nil)
 			})
 
 			t.Run("It errors if slot not found", func(t *testing.T) {
@@ -56,7 +56,7 @@ func TestReplicationSlot(t *testing.T) {
 				_, err = r.ReplicationSlot(ctx)
 				require.ErrorIs(t, err, ErrReplicationSlotNotFound)
 
-				c.Stop(ctx, nil)
+				_ = c.Stop(ctx, nil)
 			})
 		}
 	})
@@ -217,7 +217,7 @@ func TestInsert(t *testing.T) {
 
 			cancel()
 
-			c.Stop(ctx, nil)
+			_ = c.Stop(ctx, nil)
 		})
 	}
 }
@@ -365,7 +365,7 @@ func TestUpdateMany_ReplicaIdentityFull(t *testing.T) {
 
 			cancel()
 
-			c.Stop(ctx, nil)
+			_ = c.Stop(ctx, nil)
 		})
 	}
 }
@@ -483,7 +483,7 @@ func TestUpdateMany_DisableReplicaIdentityFull(t *testing.T) {
 
 			cancel()
 
-			c.Stop(ctx, nil)
+			_ = c.Stop(ctx, nil)
 		})
 	}
 }
@@ -510,7 +510,7 @@ func TestConnectingWithoutLogicalReplicationFails(t *testing.T) {
 		err = r.Pull(ctx, nil)
 		require.ErrorIs(t, err, ErrLogicalReplicationNotSetUp)
 
-		c.Stop(ctx, nil)
+		_ = c.Stop(ctx, nil)
 	}
 }
 
@@ -531,7 +531,7 @@ func TestConnectingWithoutReplicationSlotFails(t *testing.T) {
 		err = r.Pull(ctx, nil)
 		require.ErrorIs(t, err, ErrReplicationSlotNotFound)
 
-		c.Stop(ctx, nil)
+		_ = c.Stop(ctx, nil)
 	}
 }
 
@@ -561,6 +561,8 @@ func TestMultipleConectionsFail(t *testing.T) {
 		<-time.After(50 * time.Millisecond)
 
 		r2, err := Postgres(ctx, opts)
+		require.NoError(t, err)
+
 		err = r2.Pull(ctx, nil)
 		require.ErrorIs(t, err, ErrReplicationAlreadyRunning)
 
@@ -569,6 +571,6 @@ func TestMultipleConectionsFail(t *testing.T) {
 		<-time.After(time.Second)
 
 		timeout := time.Second
-		c.Stop(ctx, &timeout)
+		_ = c.Stop(ctx, &timeout)
 	}
 }
