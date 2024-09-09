@@ -3,7 +3,7 @@ package replicator
 import (
 	"context"
 
-	"github.com/inngest/pgcap/pkg/changeset"
+	"github.com/inngest/dbcap/pkg/changeset"
 )
 
 // Watermarker is a function which saves a given changeset to local storage.  This allows

@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"strconv"
 
-	"github.com/inngest/pgcap/pkg/changeset"
-	"github.com/inngest/pgcap/pkg/consts/pgconsts"
-	"github.com/inngest/pgcap/pkg/schema"
+	"github.com/inngest/dbcap/pkg/changeset"
+	"github.com/inngest/dbcap/pkg/consts/pgconsts"
+	"github.com/inngest/dbcap/pkg/schema"
 	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5/pgtype"
 )

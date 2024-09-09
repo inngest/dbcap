@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/inngest/dbcap/pkg/changeset"
 	"github.com/inngest/inngestgo"
-	"github.com/inngest/pgcap/pkg/changeset"
 )
 
 func NewAPIClientWriter(

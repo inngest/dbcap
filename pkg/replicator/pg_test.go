@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inngest/pgcap/internal/test"
-	"github.com/inngest/pgcap/pkg/changeset"
-	"github.com/inngest/pgcap/pkg/eventwriter"
+	"github.com/inngest/dbcap/internal/test"
+	"github.com/inngest/dbcap/pkg/changeset"
+	"github.com/inngest/dbcap/pkg/eventwriter"
 	"github.com/jackc/pglogrepl"
 	"github.com/stretchr/testify/require"
 )

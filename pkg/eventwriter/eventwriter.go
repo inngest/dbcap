@@ -5,7 +5,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/inngest/pgcap/pkg/changeset"
+	"github.com/inngest/dbcap/pkg/changeset"
 )
 
 const (

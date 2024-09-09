@@ -1,6 +1,6 @@
 package decoder
 
-import "github.com/inngest/pgcap/pkg/changeset"
+import "github.com/inngest/dbcap/pkg/changeset"
 
 type Decoder interface {
 	// Decode accepts CDC input and updates the changeset after decoding the given

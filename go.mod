@@ -1,4 +1,4 @@
-module github.com/inngest/pgcap
+module github.com/inngest/dbcap
 
 go 1.22.0
 

@@ -3,7 +3,7 @@ package eventwriter
 import (
 	"context"
 
-	"github.com/inngest/pgcap/pkg/changeset"
+	"github.com/inngest/dbcap/pkg/changeset"
 )
 
 // NewCallbackWriter is a simple writer which calls a callback for a given changeset.
