@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 
+	"github.com/inngest/pgcap/pkg/changeset"
 	"github.com/inngest/pgcap/pkg/eventwriter"
 	"github.com/inngest/pgcap/pkg/replicator"
 	"github.com/jackc/pgx/v5"
@@ -12,12 +15,9 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// 1: Connect to postgres
-	// 2: Start streaming stuff
-	//   3: Store LSN, etc, as watermarks
-	// 4: Allow full dumps, in the future.
 	cstr := os.Getenv("DATABASE_URL")
 	if cstr == "" {
+		// Example
 		cstr = "postgres://inngest:password@localhost:5432/db?replication=database"
 	}
 
@@ -33,7 +33,14 @@ func main() {
 		panic(err)
 	}
 
-	writer := eventwriter.NewAPIClientWriter(ctx, nil, 10)
+	writer := eventwriter.NewCallbackWriter(ctx, func(cs *changeset.Changeset) {
+		if cs == nil {
+			return
+		}
+		evt := eventwriter.ChangesetToEvent(*cs)
+		byt, _ := json.Marshal(evt)
+		fmt.Println(string(byt))
+	})
 	csChan := writer.Listen(ctx, r)
 
 	if err := r.Pull(ctx, csChan); err != nil {
