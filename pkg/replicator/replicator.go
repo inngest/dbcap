@@ -23,5 +23,9 @@ type Replicator interface {
 	// sending all found changesets on the given changeset channel.
 	Pull(context.Context, chan *changeset.Changeset) error
 
+	// TestConnection tests the replicator connection, returning an error if the
+	// connection or DB configuration is invalid.
+	TestConnection(ctx context.Context) error
+
 	changeset.WatermarkCommitter
 }
