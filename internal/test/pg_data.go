@@ -57,7 +57,7 @@ func InsertAccounts(t *testing.T, ctx context.Context, cfg pgx.ConnConfig, opts 
 		opts.Max = 1
 	}
 
-	at := time.Unix(1725000000, 0)
+	at := time.Unix(1725000000, 0).UTC()
 
 	rand := rand.New(rand.NewSource(opts.Seed))
 

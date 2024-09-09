@@ -212,6 +212,15 @@ func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 		return err
 	}
 
+	// Postgres batches every individual insert, update, etc. within a BEGIN/COMMIT message.
+	// This is great for replication.  However, for Inngest events, we don't want superflous begin
+	// or commit messages as events.
+	//
+	// The txn unwrapper acts as a buffer for the begin and first DML message.  Once received, we
+	// check the next chagneset;  if the changeset is a COMMIT we discard the BEGIN and only serve
+	// the DML.
+	unwrapper := &txnUnwrapper{cc: cc}
+
 	for {
 		if ctx.Err() != nil || atomic.LoadInt32(&p.stopped) == 1 {
 			// Always call Close automatically.
@@ -227,9 +236,7 @@ func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 			continue
 		}
 
-		if cc != nil {
-			cc <- changes
-		}
+		unwrapper.Process(changes)
 	}
 }
 

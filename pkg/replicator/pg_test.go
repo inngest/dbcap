@@ -139,22 +139,14 @@ func TestInsert(t *testing.T) {
 			require.NoError(t, err)
 
 			var (
-				total   int32
 				inserts int32
 			)
 
 			cb := eventwriter.NewCallbackWriter(ctx, func(cs *changeset.Changeset) {
-				atomic.AddInt32(&total, 1)
+				next := atomic.AddInt32(&inserts, 1)
 
-				if cs.Operation == changeset.OperationInsert {
-					atomic.AddInt32(&inserts, 1)
-				}
-
-				switch atomic.LoadInt32(&total) {
-				case 1:
-					require.EqualValues(t, changeset.OperationBegin, cs.Operation)
-				case 2:
-					// Insert op
+				if next == 1 {
+					// First insert op
 					require.EqualValues(t, changeset.OperationInsert, cs.Operation)
 					require.Equal(t, "accounts", cs.Data.Table, "expected account name to be inserted")
 					require.Equal(
@@ -170,7 +162,7 @@ func TestInsert(t *testing.T) {
 							},
 							"created_at": {
 								Encoding: "t",
-								Data:     "2024-08-30 07:40:00",
+								Data:     "2024-08-30 06:40:00",
 							},
 							"enabled": {
 								Encoding: "t",
@@ -190,13 +182,11 @@ func TestInsert(t *testing.T) {
 							},
 							"updated_at": {
 								Encoding: "t",
-								Data:     "2024-08-30 07:40:00",
+								Data:     "2024-08-30 06:40:00",
 							},
 						},
 						cs.Data.New,
 					)
-				case 3:
-					require.EqualValues(t, changeset.OperationCommit, cs.Operation)
 				}
 			})
 			csChan := cb.Listen(ctx, r)
@@ -212,7 +202,6 @@ func TestInsert(t *testing.T) {
 			})
 
 			<-time.After(1 * time.Second)
-			require.EqualValues(t, 150, total)
 			require.EqualValues(t, 50, inserts)
 
 			cancel()
@@ -280,7 +269,7 @@ func TestUpdateMany_ReplicaIdentityFull(t *testing.T) {
 							},
 							"created_at": {
 								Encoding: "t",
-								Data:     "2024-08-30 07:40:00",
+								Data:     "2024-08-30 06:40:00",
 							},
 							"enabled": {
 								Encoding: "t",
@@ -300,7 +289,7 @@ func TestUpdateMany_ReplicaIdentityFull(t *testing.T) {
 							},
 							"updated_at": {
 								Encoding: "t",
-								Data:     "2024-08-30 07:40:00",
+								Data:     "2024-08-30 06:40:00",
 							},
 						},
 						cs.Data.Old,
@@ -319,7 +308,7 @@ func TestUpdateMany_ReplicaIdentityFull(t *testing.T) {
 							},
 							"created_at": {
 								Encoding: "t",
-								Data:     "2024-08-30 07:40:00",
+								Data:     "2024-08-30 06:40:00",
 							},
 							"enabled": {
 								Encoding: "t",
@@ -339,7 +328,7 @@ func TestUpdateMany_ReplicaIdentityFull(t *testing.T) {
 							},
 							"updated_at": {
 								Encoding: "t",
-								Data:     "2024-08-30 07:40:00",
+								Data:     "2024-08-30 06:40:00",
 							},
 						},
 						cs.Data.New,
@@ -376,7 +365,7 @@ func TestUpdateMany_DisableReplicaIdentityFull(t *testing.T) {
 
 	for _, v1 := range versions {
 		v := v1 // loop capture
-		t.Run(fmt.Sprintf("Insert - Postgres %d", v), func(t *testing.T) {
+		t.Run(fmt.Sprintf("Update many without replica identity full - Postgres %d", v), func(t *testing.T) {
 			t.Parallel()
 
 			ctx, cancel := context.WithCancel(context.Background())
@@ -437,7 +426,7 @@ func TestUpdateMany_DisableReplicaIdentityFull(t *testing.T) {
 							},
 							"created_at": {
 								Encoding: "t",
-								Data:     "2024-08-30 07:40:00",
+								Data:     "2024-08-30 06:40:00",
 							},
 							"enabled": {
 								Encoding: "t",
@@ -457,7 +446,7 @@ func TestUpdateMany_DisableReplicaIdentityFull(t *testing.T) {
 							},
 							"updated_at": {
 								Encoding: "t",
-								Data:     "2024-08-30 07:40:00",
+								Data:     "2024-08-30 06:40:00",
 							},
 						},
 						cs.Data.New,

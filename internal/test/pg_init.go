@@ -26,6 +26,7 @@ type StartPGOpts struct {
 func StartPG(t *testing.T, ctx context.Context, opts StartPGOpts) (tc.Container, pgx.ConnConfig) {
 	t.Helper()
 	args := []tc.ContainerCustomizer{
+		tc.WithLogger(nil),
 		pgtc.WithDatabase("db"),
 		pgtc.WithUsername("postgres"),
 		pgtc.WithPassword("password"),
