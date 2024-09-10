@@ -7,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func main() {
+func init() {
 	ctx := context.Background()
 	c, err := pgconn.Connect(ctx, os.Getenv("DATABASE_URL"))
 	if err != nil {

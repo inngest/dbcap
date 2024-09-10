@@ -31,9 +31,6 @@ func (t *txnUnwrapper) Process(cs *changeset.Changeset) {
 
 	switch cs.Operation {
 	case changeset.OperationBegin:
-		if t.begin != nil {
-			// LOG WARNING
-		}
 		t.begin = cs
 	case changeset.OperationCommit:
 		if atomic.LoadInt32(&t.sequence) == 1 {

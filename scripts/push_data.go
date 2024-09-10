@@ -25,7 +25,7 @@ func hash(in any) string {
 	}
 }
 
-func main() {
+func push() {
 	ctx := context.Background()
 	c, err := pgconn.Connect(ctx, os.Getenv("DATABASE_URL"))
 	if err != nil {

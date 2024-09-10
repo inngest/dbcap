@@ -24,12 +24,6 @@ type v1LogicalDecoder struct {
 
 	schema    *schema.PGXSchemaLoader
 	relations map[uint32]*pglogrepl.RelationMessage
-
-	// Postgres batches every individual insert, update, etc. within a BEGIN/COMMIT message.
-	// This is great for replication.  However, for Inngest events, we don't want superflous begin
-	// or commit messages as events.
-	//
-	// We store the current txn LSN and number of operations.
 }
 
 func (v1LogicalDecoder) ReplicationPluginArgs() []string {
