@@ -88,9 +88,6 @@ func (v v1LogicalDecoder) Decode(in []byte, cs *changeset.Changeset) (bool, erro
 }
 
 func (v *v1LogicalDecoder) mutateChangeset(in pglogrepl.Message, cs *changeset.Changeset) error {
-	// XXX: When seeing a begin, annotate the transaction ID, LSN,
-	// and commit time to all messages between the begin and commit.
-
 	switch msg := in.(type) {
 	case *pglogrepl.BeginMessage:
 		cs.Operation = changeset.OperationBegin
