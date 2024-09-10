@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// nolint
 func hash(in any) string {
 	switch v := in.(type) {
 	case string:
@@ -25,6 +26,7 @@ func hash(in any) string {
 	}
 }
 
+// nolint
 func push() {
 	ctx := context.Background()
 	c, err := pgconn.Connect(ctx, os.Getenv("DATABASE_URL"))
