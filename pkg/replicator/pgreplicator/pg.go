@@ -145,11 +145,6 @@ func (p *pg) Close(ctx context.Context) error {
 	return nil
 }
 
-func (p *pg) TestConnection(ctx context.Context) (replicator.ConnectionResult, error) {
-	_, err := p.ReplicationSlot(ctx)
-	return nil, err
-}
-
 func (p *pg) ReplicationSlot(ctx context.Context) (ReplicationSlot, error) {
 	mode, err := p.walMode(ctx)
 	if err != nil {

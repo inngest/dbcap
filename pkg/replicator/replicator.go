@@ -19,6 +19,8 @@ type WatermarkSaver func(ctx context.Context, watermark changeset.Watermark) err
 type WatermarkLoader func(ctx context.Context) (*changeset.Watermark, error)
 
 type Replicator interface {
+	changeset.WatermarkCommitter
+
 	// Pull is a blocking method which pulls changes from an external source,
 	// sending all found changesets on the given changeset channel.
 	//
@@ -32,12 +34,6 @@ type Replicator interface {
 	// Stop stops pulling and shuts down the replicator.  This is an alternative
 	// to cancelling the context passed into Pull.
 	Stop()
-
-	// TestConnection tests the replicator connection, returning connection information
-	// and any errors with the setup.
-	TestConnection(ctx context.Context) (ConnectionResult, error)
-
-	changeset.WatermarkCommitter
 }
 
 type ConnectionResult interface {
@@ -54,4 +50,12 @@ type ConnectionResult interface {
 type ConnectionStepResult struct {
 	Error    error `json:"error"`
 	Complete bool  `json:"complete"`
+}
+
+type SystemInitializer interface {
+	// PerformInit perform setup for the replicator.
+	PerformInit(ctx context.Context) (ConnectionResult, error)
+
+	// CheckInit ensures that the setup for the replicator is complete.
+	CheckInit(ctx context.Context) (ConnectionResult, error)
 }
