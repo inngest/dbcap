@@ -33,9 +33,25 @@ type Replicator interface {
 	// to cancelling the context passed into Pull.
 	Stop()
 
-	// TestConnection tests the replicator connection, returning an error if the
-	// connection or DB configuration is invalid.
-	TestConnection(ctx context.Context) error
+	// TestConnection tests the replicator connection, returning connection information
+	// and any errors with the setup.
+	TestConnection(ctx context.Context) (ConnectionResult, error)
 
 	changeset.WatermarkCommitter
+}
+
+type ConnectionResult interface {
+	// Steps indicates the sequential steps necessary to set up a replicator.  For example,
+	// the Postgres replicator may return {"credentials", "user_created", "replication_slot_created"...}
+	// and so on for each step required to connect.
+	Steps() []string
+
+	// Results contains a map for each Step string listed in Steps[], representing whether each
+	// step has been complete and any error message for each step.
+	Results() map[string]ConnectionStepResult
+}
+
+type ConnectionStepResult struct {
+	Error    error `json:"error"`
+	Complete bool  `json:"complete"`
 }

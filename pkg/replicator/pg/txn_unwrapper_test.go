@@ -1,4 +1,4 @@
-package replicator
+package pg
 
 import (
 	"testing"

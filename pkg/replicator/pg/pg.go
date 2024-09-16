@@ -1,4 +1,4 @@
-package replicator
+package pg
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	"github.com/inngest/dbcap/pkg/changeset"
 	"github.com/inngest/dbcap/pkg/consts/pgconsts"
 	"github.com/inngest/dbcap/pkg/decoder"
+	"github.com/inngest/dbcap/pkg/replicator"
 	"github.com/inngest/dbcap/pkg/schema"
 	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5"
@@ -25,6 +26,10 @@ var (
 	ReadTimeout    = time.Second * 5
 	CommitInterval = time.Second * 5
 
+	ErrInvalidCredentials = fmt.Errorf("TODO")
+
+	ErrConnectionTimeout = fmt.Errorf("TODO")
+
 	ErrLogicalReplicationNotSetUp = fmt.Errorf("ERR_PG_001: Your database does not have logical replication configured.  You must set the WAL level to 'logical' to stream events.")
 
 	ErrReplicationSlotNotFound = fmt.Errorf("ERR_PG_002: The replication slot 'inngest_cdc' doesn't exist in your database.  Please create the logical replication slot to stream events.")
@@ -34,7 +39,7 @@ var (
 
 // PostgresReplicator is a Replicator with added postgres functionality.
 type PostgresReplicator interface {
-	Replicator
+	replicator.Replicator
 
 	// ReplicationSlot returns the replication slot data or an error.
 	//
@@ -53,11 +58,11 @@ type PostgresOpts struct {
 	Config pgx.ConnConfig
 	// WatermarkSaver saves the current watermark to local storage.  This should be paired with a
 	// WatermarkLoader to load offsets when the replicator restarts.
-	WatermarkSaver WatermarkSaver
+	WatermarkSaver replicator.WatermarkSaver
 	// WatermarkLoader, if specified, loads watermarks for the given connection to start replication
 	// from a given offset.  If this isn't specified, replication will start from the latest point in
 	// the Postgres server's WAL.
-	WatermarkLoader WatermarkLoader
+	WatermarkLoader replicator.WatermarkLoader
 	// Log, if specified, is the stdlib logger used to log debug and warning messages during
 	// replication.
 	Log *slog.Logger
@@ -140,9 +145,9 @@ func (p *pg) Close(ctx context.Context) error {
 	return nil
 }
 
-func (p *pg) TestConnection(ctx context.Context) error {
+func (p *pg) TestConnection(ctx context.Context) (replicator.ConnectionResult, error) {
 	_, err := p.ReplicationSlot(ctx)
-	return err
+	return nil, err
 }
 
 func (p *pg) ReplicationSlot(ctx context.Context) (ReplicationSlot, error) {

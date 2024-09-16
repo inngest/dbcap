@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/inngest/dbcap/pkg/replicator/pg/pgsetup"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
@@ -50,16 +51,17 @@ func StartPG(t *testing.T, ctx context.Context, opts StartPGOpts) (tc.Container,
 		require.NoError(t, err)
 	}
 
-	if !opts.DisableCreateRoles {
-		// Create the replication slot.
-		err := prepareRoles(ctx, conn)
-		require.NoError(t, err)
-	}
-	if !opts.DisableCreateSlot {
-		// Create the replication slot.
-		err := createReplicationSlot(ctx, conn)
-		require.NoError(t, err)
-	}
+	connCfg, err := pgx.ParseConfig(connString(t, c))
+	require.NoError(t, err, "Failed to parse config")
+
+	sr, err := pgsetup.Setup(ctx, pgsetup.SetupOpts{
+		AdminConfig:        *connCfg,
+		Password:           "password",
+		DisableCreateUser:  opts.DisableCreateRoles,
+		DisableCreateRoles: opts.DisableCreateRoles,
+		DisableCreateSlot:  opts.DisableCreateSlot,
+	})
+	require.NoError(t, err, "Setup results: %#v", sr.Results())
 
 	err = createTables(ctx, conn)
 	require.NoError(t, err)
@@ -96,33 +98,6 @@ func connOpts(t *testing.T, c tc.Container) pgx.ConnConfig {
 	cfg, err := pgx.ParseConfig(connString(t, c))
 	require.NoError(t, err)
 	return *cfg
-}
-
-func prepareRoles(ctx context.Context, c *pgconn.PgConn) error {
-	stmt := `
-		CREATE USER inngest WITH REPLICATION PASSWORD 'password';
-		GRANT USAGE ON SCHEMA public TO inngest;
-		GRANT SELECT ON ALL TABLES IN SCHEMA public TO inngest;
-		ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO inngest;
-		CREATE PUBLICATION inngest FOR ALL TABLES;
-	`
-	res := c.Exec(ctx, stmt)
-	if err := res.Close(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func createReplicationSlot(ctx context.Context, c *pgconn.PgConn) error {
-	stmt := `
-		-- pgoutput logical repl plugin
-		SELECT pg_create_logical_replication_slot('inngest_cdc', 'pgoutput');
-	`
-	res := c.Exec(ctx, stmt)
-	if err := res.Close(); err != nil {
-		return err
-	}
-	return nil
 }
 
 func createTables(ctx context.Context, c *pgconn.PgConn) error {
