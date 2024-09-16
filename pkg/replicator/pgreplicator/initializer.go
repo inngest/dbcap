@@ -30,11 +30,15 @@ type InitializerOpts struct {
 func NewInitializer(ctx context.Context, opts InitializerOpts) (replicator.SystemInitializer[InitializeResult], error) {
 	conn, err := pgx.ConnectConfig(ctx, &opts.AdminConfig)
 	if err != nil {
-		return nil, ErrInvalidCredentials
+		newErr := ErrInvalidCredentials
+		newErr.Data = map[string]any{"detail": err.Error()}
+		return nil, newErr
 	}
 	defer conn.Close(ctx)
 	if err := conn.Ping(ctx); err != nil {
-		return nil, ErrCannotCommunicate
+		newErr := ErrCannotCommunicate
+		newErr.Data = map[string]any{"detail": err.Error()}
+		return nil, newErr
 	}
 	return initializer[pgsetup.TestConnResult]{opts: opts}, nil
 }

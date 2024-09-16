@@ -2,6 +2,7 @@ package replicator
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/inngest/dbcap/pkg/changeset"
 )
@@ -47,15 +48,35 @@ type ConnectionResult interface {
 	Results() map[string]ConnectionStepResult
 }
 
-type ConnectionStepResult struct {
-	Error    error `json:"error"`
-	Complete bool  `json:"complete"`
-}
-
 type SystemInitializer[T ConnectionResult] interface {
 	// PerformInit perform setup for the replicator.
 	PerformInit(ctx context.Context) (T, error)
 
 	// CheckInit ensures that the setup for the replicator is complete.
 	CheckInit(ctx context.Context) (T, error)
+}
+
+type ConnectionStepResult struct {
+	Error    error `json:"error"`
+	Complete bool  `json:"complete"`
+}
+
+func (c ConnectionStepResult) MarshalJSON() ([]byte, error) {
+	res := map[string]any{"complete": c.Complete}
+
+	if c.Error == nil {
+		return json.Marshal(res)
+	}
+
+	if m, ok := c.Error.(json.Marshaler); ok {
+		byt, err := m.MarshalJSON()
+		if err != nil {
+			return nil, err
+		}
+		res["error"] = json.RawMessage(byt)
+		return json.Marshal(res)
+	}
+
+	res["error"] = c.Error.Error()
+	return json.Marshal(res)
 }
