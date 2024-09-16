@@ -8,6 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+type InitializeResult = pgsetup.TestConnResult
+
 type InitializerOpts struct {
 	// AdminConfig are admin credentials to verify DB config, eg. replication slots, publications,
 	// wal mode, etc.
@@ -17,7 +19,7 @@ type InitializerOpts struct {
 	Password string
 }
 
-func NewInitializer(ctx context.Context, opts InitializerOpts) replicator.SystemInitializer[pgsetup.TestConnResult] {
+func NewInitializer(ctx context.Context, opts InitializerOpts) replicator.SystemInitializer[InitializeResult] {
 	// TODO: Immediatey
 
 	return initializer[pgsetup.TestConnResult]{opts: opts}
@@ -28,7 +30,7 @@ type initializer[T pgsetup.TestConnResult] struct {
 }
 
 // PerformInit perform setup for the replicator.
-func (i initializer[T]) PerformInit(ctx context.Context) (pgsetup.TestConnResult, error) {
+func (i initializer[T]) PerformInit(ctx context.Context) (InitializeResult, error) {
 	return pgsetup.Setup(ctx, pgsetup.SetupOpts{
 		AdminConfig: i.opts.AdminConfig,
 		Password:    i.opts.Password,
@@ -36,7 +38,7 @@ func (i initializer[T]) PerformInit(ctx context.Context) (pgsetup.TestConnResult
 }
 
 // CheckInit checks setup for the replicator.
-func (i initializer[T]) CheckInit(ctx context.Context) (pgsetup.TestConnResult, error) {
+func (i initializer[T]) CheckInit(ctx context.Context) (InitializeResult, error) {
 	return pgsetup.Check(ctx, pgsetup.SetupOpts{
 		AdminConfig: i.opts.AdminConfig,
 		Password:    i.opts.Password,
