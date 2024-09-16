@@ -1,4 +1,4 @@
-package pg
+package pgreplicator
 
 import (
 	"context"
@@ -54,7 +54,7 @@ type PostgresReplicator interface {
 	Close(ctx context.Context) error
 }
 
-type PostgresOpts struct {
+type Opts struct {
 	Config pgx.ConnConfig
 	// WatermarkSaver saves the current watermark to local storage.  This should be paired with a
 	// WatermarkLoader to load offsets when the replicator restarts.
@@ -68,8 +68,8 @@ type PostgresOpts struct {
 	Log *slog.Logger
 }
 
-// Postgres returns a new postgres replicator for a single postgres database.
-func Postgres(ctx context.Context, opts PostgresOpts) (PostgresReplicator, error) {
+// New returns a new postgres replicator for a single postgres database.
+func New(ctx context.Context, opts Opts) (PostgresReplicator, error) {
 	cfg := opts.Config
 
 	// Ensure that we add "replication": "database" as a to the replication
@@ -114,7 +114,7 @@ func Postgres(ctx context.Context, opts PostgresOpts) (PostgresReplicator, error
 
 type pg struct {
 	// opts stores the initialization opts, including watermark functs
-	opts PostgresOpts
+	opts Opts
 	// conn is the WAL streaming connection.  Once replication starts, this
 	// conn cannot be used for any queries.
 	conn *pgx.Conn

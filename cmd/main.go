@@ -8,7 +8,7 @@ import (
 
 	"github.com/inngest/dbcap/pkg/changeset"
 	"github.com/inngest/dbcap/pkg/eventwriter"
-	"github.com/inngest/dbcap/pkg/replicator/pg"
+	"github.com/inngest/dbcap/pkg/replicator/pgreplicator"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -26,7 +26,7 @@ func main() {
 		panic(err)
 	}
 
-	r, err := pg.Postgres(ctx, pg.PostgresOpts{
+	r, err := pgreplicator.New(ctx, pgreplicator.Opts{
 		Config: *config,
 	})
 	if err != nil {

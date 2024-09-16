@@ -1,4 +1,4 @@
-package pg
+package pgreplicator
 
 import (
 	"context"
@@ -32,7 +32,7 @@ func TestReplicationSlot(t *testing.T) {
 					DisableCreateSlot:         true,
 				})
 
-				r, err := Postgres(ctx, PostgresOpts{Config: cfg})
+				r, err := New(ctx, Opts{Config: cfg})
 				require.NoError(t, err)
 
 				_, err = r.ReplicationSlot(ctx)
@@ -50,7 +50,7 @@ func TestReplicationSlot(t *testing.T) {
 					DisableCreateSlot: true,
 				})
 
-				r, err := Postgres(ctx, PostgresOpts{Config: cfg})
+				r, err := New(ctx, Opts{Config: cfg})
 				require.NoError(t, err)
 
 				_, err = r.ReplicationSlot(ctx)
@@ -78,7 +78,7 @@ func TestCommit(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 
 			c, cfg := test.StartPG(t, ctx, test.StartPGOpts{Version: v})
-			r, err := Postgres(ctx, PostgresOpts{Config: cfg})
+			r, err := New(ctx, Opts{Config: cfg})
 			require.NoError(t, err)
 
 			// Set up event writer which listens to changes
@@ -134,8 +134,8 @@ func TestInsert(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 
 			c, conn := test.StartPG(t, ctx, test.StartPGOpts{Version: v})
-			opts := PostgresOpts{Config: conn}
-			r, err := Postgres(ctx, opts)
+			opts := Opts{Config: conn}
+			r, err := New(ctx, opts)
 			require.NoError(t, err)
 
 			var (
@@ -223,7 +223,7 @@ func TestUpdateMany_ReplicaIdentityFull(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 
 			c, connCfg := test.StartPG(t, ctx, test.StartPGOpts{Version: v})
-			opts := PostgresOpts{Config: connCfg}
+			opts := Opts{Config: connCfg}
 
 			//
 			// Insert accounts before starting replication watching.  This lets us
@@ -234,7 +234,7 @@ func TestUpdateMany_ReplicaIdentityFull(t *testing.T) {
 				Interval: 1 * time.Millisecond,
 			})
 
-			r, err := Postgres(ctx, opts)
+			r, err := New(ctx, opts)
 			require.NoError(t, err)
 
 			var (
@@ -374,7 +374,7 @@ func TestUpdateMany_DisableReplicaIdentityFull(t *testing.T) {
 				Version:                    v,
 				DisableReplicaIdentityFull: true,
 			})
-			opts := PostgresOpts{Config: connCfg}
+			opts := Opts{Config: connCfg}
 
 			//
 			// Insert accounts before starting replication watching.  This lets us
@@ -385,7 +385,7 @@ func TestUpdateMany_DisableReplicaIdentityFull(t *testing.T) {
 				Interval: 1 * time.Millisecond,
 			})
 
-			r, err := Postgres(ctx, opts)
+			r, err := New(ctx, opts)
 			require.NoError(t, err)
 
 			var (
@@ -492,8 +492,8 @@ func TestConnectingWithoutLogicalReplicationFails(t *testing.T) {
 			DisableCreateSlot:         true,
 		})
 
-		opts := PostgresOpts{Config: conn}
-		r, err := Postgres(ctx, opts)
+		opts := Opts{Config: conn}
+		r, err := New(ctx, opts)
 		require.NoError(t, err)
 
 		err = r.Pull(ctx, nil)
@@ -513,8 +513,8 @@ func TestConnectingWithoutReplicationSlotFails(t *testing.T) {
 			DisableCreateSlot: true,
 		})
 
-		opts := PostgresOpts{Config: conn}
-		r, err := Postgres(ctx, opts)
+		opts := Opts{Config: conn}
+		r, err := New(ctx, opts)
 		require.NoError(t, err)
 
 		err = r.Pull(ctx, nil)
@@ -534,8 +534,8 @@ func TestMultipleConectionsFail(t *testing.T) {
 		})
 
 		// The first time we connect things should succeed.
-		opts := PostgresOpts{Config: conn}
-		r1, err := Postgres(ctx, opts)
+		opts := Opts{Config: conn}
+		r1, err := New(ctx, opts)
 		require.NoError(t, err)
 
 		wg := sync.WaitGroup{}
@@ -549,7 +549,7 @@ func TestMultipleConectionsFail(t *testing.T) {
 
 		<-time.After(50 * time.Millisecond)
 
-		r2, err := Postgres(ctx, opts)
+		r2, err := New(ctx, opts)
 		require.NoError(t, err)
 
 		err = r2.Pull(ctx, nil)

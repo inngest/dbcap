@@ -1,4 +1,4 @@
-package pg
+package pgreplicator
 
 import (
 	"sync/atomic"
