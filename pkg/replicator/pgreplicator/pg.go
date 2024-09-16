@@ -25,16 +25,6 @@ import (
 var (
 	ReadTimeout    = time.Second * 5
 	CommitInterval = time.Second * 5
-
-	ErrInvalidCredentials = fmt.Errorf("TODO")
-
-	ErrConnectionTimeout = fmt.Errorf("TODO")
-
-	ErrLogicalReplicationNotSetUp = fmt.Errorf("ERR_PG_001: Your database does not have logical replication configured.  You must set the WAL level to 'logical' to stream events.")
-
-	ErrReplicationSlotNotFound = fmt.Errorf("ERR_PG_002: The replication slot 'inngest_cdc' doesn't exist in your database.  Please create the logical replication slot to stream events.")
-
-	ErrReplicationAlreadyRunning = fmt.Errorf("ERR_PG_901: Replication is already streaming events")
 )
 
 // PostgresReplicator is a Replicator with added postgres functionality.

@@ -8,13 +8,31 @@ import (
 
 	"github.com/inngest/dbcap/pkg/consts/pgconsts"
 	"github.com/inngest/dbcap/pkg/replicator"
+	"github.com/inngest/inngest/pkg/syscode"
 	"github.com/jackc/pgx/v5"
 )
 
 var (
-	ErrLogicalReplicationNotSetUp = fmt.Errorf("ERR_PG_001: Your database does not have logical replication configured.  You must set the WAL level to 'logical' to stream events.")
-	ErrReplicationSlotNotFound    = fmt.Errorf("ERR_PG_002: The replication slot 'inngest_cdc' doesn't exist in your database.  Please create the logical replication slot to stream events.")
-	ErrReplicationAlreadyRunning  = fmt.Errorf("ERR_PG_901: Replication is already streaming events")
+	ErrInvalidCredentials = syscode.Error{
+		Code:    "ERR_PG_001",
+		Message: "Invalid credentials. We cannot connect to your database.",
+	}
+	ErrCannotCommunicate = syscode.Error{
+		Code:    "ERR_PG_002",
+		Message: "Cannot communicate with your database.",
+	}
+	ErrLogicalReplicationNotSetUp = syscode.Error{
+		Code:    "ERR_PG_003",
+		Message: "Your database does not have logical replication configured.  You must set the WAL level to 'logical' to stream events.",
+	}
+	ErrReplicationSlotNotFound = syscode.Error{
+		Code:    "ERR_PG_004",
+		Message: "The replication slot 'inngest_cdc' doesn't exist in your database.  Please create the logical replication slot to stream events.",
+	}
+	ErrReplicationAlreadyRunning = syscode.Error{
+		Code:    "ERR_PG_901",
+		Message: "Replication is already streaming events",
+	}
 )
 
 type TestConnResult struct {

@@ -8,6 +8,14 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+var (
+	ErrInvalidCredentials         = pgsetup.ErrInvalidCredentials
+	ErrCannotCommunicate          = pgsetup.ErrCannotCommunicate
+	ErrLogicalReplicationNotSetUp = pgsetup.ErrLogicalReplicationNotSetUp
+	ErrReplicationSlotNotFound    = pgsetup.ErrReplicationSlotNotFound
+	ErrReplicationAlreadyRunning  = pgsetup.ErrReplicationAlreadyRunning
+)
+
 type InitializeResult = pgsetup.TestConnResult
 
 type InitializerOpts struct {
@@ -19,10 +27,16 @@ type InitializerOpts struct {
 	Password string
 }
 
-func NewInitializer(ctx context.Context, opts InitializerOpts) replicator.SystemInitializer[InitializeResult] {
-	// TODO: Immediatey
-
-	return initializer[pgsetup.TestConnResult]{opts: opts}
+func NewInitializer(ctx context.Context, opts InitializerOpts) (replicator.SystemInitializer[InitializeResult], error) {
+	conn, err := pgx.ConnectConfig(ctx, &opts.AdminConfig)
+	if err != nil {
+		return nil, ErrInvalidCredentials
+	}
+	defer conn.Close(ctx)
+	if err := conn.Ping(ctx); err != nil {
+		return nil, ErrCannotCommunicate
+	}
+	return initializer[pgsetup.TestConnResult]{opts: opts}, nil
 }
 
 type initializer[T pgsetup.TestConnResult] struct {
