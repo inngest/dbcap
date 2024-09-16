@@ -17,16 +17,18 @@ type InitializerOpts struct {
 	Password string
 }
 
-func NewInitializer(ctx context.Context, opts InitializerOpts) replicator.SystemInitializer {
-	return initializer{opts: opts}
+func NewInitializer(ctx context.Context, opts InitializerOpts) replicator.SystemInitializer[pgsetup.TestConnResult] {
+	// TODO: Immediatey
+
+	return initializer[pgsetup.TestConnResult]{opts: opts}
 }
 
-type initializer struct {
+type initializer[T pgsetup.TestConnResult] struct {
 	opts InitializerOpts
 }
 
 // PerformInit perform setup for the replicator.
-func (i initializer) PerformInit(ctx context.Context) (replicator.ConnectionResult, error) {
+func (i initializer[T]) PerformInit(ctx context.Context) (pgsetup.TestConnResult, error) {
 	return pgsetup.Setup(ctx, pgsetup.SetupOpts{
 		AdminConfig: i.opts.AdminConfig,
 		Password:    i.opts.Password,
@@ -34,7 +36,7 @@ func (i initializer) PerformInit(ctx context.Context) (replicator.ConnectionResu
 }
 
 // CheckInit checks setup for the replicator.
-func (i initializer) CheckInit(ctx context.Context) (replicator.ConnectionResult, error) {
+func (i initializer[T]) CheckInit(ctx context.Context) (pgsetup.TestConnResult, error) {
 	return pgsetup.Check(ctx, pgsetup.SetupOpts{
 		AdminConfig: i.opts.AdminConfig,
 		Password:    i.opts.Password,

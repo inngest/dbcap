@@ -52,10 +52,10 @@ type ConnectionStepResult struct {
 	Complete bool  `json:"complete"`
 }
 
-type SystemInitializer interface {
+type SystemInitializer[T ConnectionResult] interface {
 	// PerformInit perform setup for the replicator.
-	PerformInit(ctx context.Context) (ConnectionResult, error)
+	PerformInit(ctx context.Context) (T, error)
 
 	// CheckInit ensures that the setup for the replicator is complete.
-	CheckInit(ctx context.Context) (ConnectionResult, error)
+	CheckInit(ctx context.Context) (T, error)
 }

@@ -56,7 +56,7 @@ type SetupOpts struct {
 	DisableCreatePublication bool
 }
 
-func Setup(ctx context.Context, opts SetupOpts) (replicator.ConnectionResult, error) {
+func Setup(ctx context.Context, opts SetupOpts) (TestConnResult, error) {
 	conn, err := pgx.ConnectConfig(ctx, &opts.AdminConfig)
 	if err != nil {
 		return TestConnResult{}, err
@@ -69,7 +69,7 @@ func Setup(ctx context.Context, opts SetupOpts) (replicator.ConnectionResult, er
 	return setup.Setup(ctx)
 }
 
-func Check(ctx context.Context, opts SetupOpts) (replicator.ConnectionResult, error) {
+func Check(ctx context.Context, opts SetupOpts) (TestConnResult, error) {
 	conn, err := pgx.ConnectConfig(ctx, &opts.AdminConfig)
 	if err != nil {
 		return TestConnResult{}, err
@@ -89,7 +89,7 @@ type setup struct {
 	res TestConnResult
 }
 
-func (s *setup) Check(ctx context.Context) (replicator.ConnectionResult, error) {
+func (s *setup) Check(ctx context.Context) (TestConnResult, error) {
 	chain := []func(ctx context.Context) error{
 		s.checkWAL,
 		s.checkUser,
@@ -106,7 +106,7 @@ func (s *setup) Check(ctx context.Context) (replicator.ConnectionResult, error) 
 	return s.res, nil
 }
 
-func (s *setup) Setup(ctx context.Context) (replicator.ConnectionResult, error) {
+func (s *setup) Setup(ctx context.Context) (TestConnResult, error) {
 	chain := []func(ctx context.Context) error{}
 
 	if !s.opts.DisableCreateUser {
