@@ -145,6 +145,7 @@ func (s *setup) Setup(ctx context.Context) (TestConnResult, error) {
 			return s.res, err
 		}
 	}
+
 	return s.res, nil
 }
 
@@ -197,6 +198,7 @@ func (s *setup) createUser(ctx context.Context) error {
 		s.res.UserCreated.Error = fmt.Errorf("Error creating user '%s': %w", pgconsts.Username, err)
 		return s.res.UserCreated.Error
 	}
+	s.res.UserCreated.Error = nil
 	return nil
 }
 
@@ -218,6 +220,7 @@ func (s *setup) createRoles(ctx context.Context) error {
 		return s.res.RolesGranted.Error
 	}
 	s.res.RolesGranted.Complete = true
+	s.res.RolesGranted.Error = nil
 	return nil
 }
 
@@ -235,6 +238,7 @@ func (s *setup) checkReplicationSlot(ctx context.Context) error {
 	}
 
 	s.res.SlotCreated.Complete = true
+	s.res.SlotCreated.Error = nil
 	return nil
 }
 
@@ -253,6 +257,7 @@ func (s *setup) createReplicationSlot(ctx context.Context) error {
 		return s.res.SlotCreated.Error
 	}
 	s.res.SlotCreated.Complete = true
+	s.res.SlotCreated.Error = nil
 	return nil
 }
 
@@ -270,6 +275,7 @@ func (s *setup) checkPublication(ctx context.Context) error {
 	}
 
 	s.res.PublicationCreated.Complete = true
+	s.res.PublicationCreated.Error = nil
 	return nil
 }
 
@@ -285,5 +291,6 @@ func (s *setup) createPublication(ctx context.Context) error {
 		return s.res.PublicationCreated.Error
 	}
 	s.res.PublicationCreated.Complete = true
+	s.res.PublicationCreated.Error = nil
 	return nil
 }
