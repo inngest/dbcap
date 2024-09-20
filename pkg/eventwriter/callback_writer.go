@@ -55,10 +55,13 @@ func (a *cbWriter) Listen(ctx context.Context, committer changeset.WatermarkComm
 
 			select {
 			case <-ctx.Done():
+				if i == 0 {
+					// Do nothing.
+					return
+				}
+
 				// Shutting down.  Send the existing batch.
-				if err := a.onChangeset(buf); err != nil {
-					// TODO: Fail.  What do we do here?
-				} else {
+				if err := a.onChangeset(buf); err == nil {
 					committer.Commit(buf[i-1].Watermark)
 				}
 				return
@@ -70,9 +73,7 @@ func (a *cbWriter) Listen(ctx context.Context, committer changeset.WatermarkComm
 				}
 
 				// We have events after a timeout - send them.
-				if err := a.onChangeset(buf); err != nil {
-					// TODO: Fail.  What do we do here?
-				} else {
+				if err := a.onChangeset(buf); err == nil {
 					// Commit the last LSN.
 					committer.Commit(buf[i-1].Watermark)
 				}
@@ -83,9 +84,7 @@ func (a *cbWriter) Listen(ctx context.Context, committer changeset.WatermarkComm
 			case msg := <-a.cs:
 				if i == a.batchSize {
 					// send this batch, as we're full.
-					if err := a.onChangeset(buf); err != nil {
-						// TODO: Fail.  What do we do here?
-					} else {
+					if err := a.onChangeset(buf); err == nil {
 						committer.Commit(buf[i-1].Watermark)
 					}
 					// reset the buffer

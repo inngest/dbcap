@@ -96,6 +96,7 @@ func New(ctx context.Context, opts Opts) (PostgresReplicator, error) {
 	}
 
 	return &pg{
+		opts:      opts,
 		conn:      replConn,
 		queryConn: pgxc,
 		decoder:   decoder.NewV1LogicalDecoder(sl),
@@ -195,7 +196,9 @@ func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 		if err != nil {
 			return fmt.Errorf("error loading watermark: %w", err)
 		}
-		startLSN = watermark.LSN
+		if watermark != nil && watermark.LSN > 0 {
+			startLSN = watermark.LSN
+		}
 	}
 
 	if err := p.Connect(ctx, pglogrepl.LSN(startLSN)); err != nil {
