@@ -83,8 +83,9 @@ func TestCommit(t *testing.T) {
 
 			// Set up event writer which listens to changes
 			var latestReceivedLSN pglogrepl.LSN
-			cb := eventwriter.NewCallbackWriter(ctx, func(cs *changeset.Changeset) {
-				latestReceivedLSN = cs.Watermark.LSN
+			cb := eventwriter.NewCallbackWriter(ctx, 1, func(cs []*changeset.Changeset) error {
+				latestReceivedLSN = cs[0].Watermark.LSN
+				return nil
 			})
 			csChan := cb.Listen(ctx, r)
 			// Star the replicator which forwards to our event writer
@@ -142,7 +143,8 @@ func TestInsert(t *testing.T) {
 				inserts int32
 			)
 
-			cb := eventwriter.NewCallbackWriter(ctx, func(cs *changeset.Changeset) {
+			cb := eventwriter.NewCallbackWriter(ctx, 1, func(batch []*changeset.Changeset) error {
+				cs := batch[0]
 				next := atomic.AddInt32(&inserts, 1)
 
 				if next == 1 {
@@ -188,6 +190,7 @@ func TestInsert(t *testing.T) {
 						cs.Data.New,
 					)
 				}
+				return nil
 			})
 			csChan := cb.Listen(ctx, r)
 
@@ -242,7 +245,8 @@ func TestUpdateMany_ReplicaIdentityFull(t *testing.T) {
 				updates int32
 			)
 
-			cb := eventwriter.NewCallbackWriter(ctx, func(cs *changeset.Changeset) {
+			cb := eventwriter.NewCallbackWriter(ctx, 1, func(batch []*changeset.Changeset) error {
+				cs := batch[0]
 				atomic.AddInt32(&total, 1)
 
 				if cs.Operation == changeset.OperationUpdate {
@@ -337,6 +341,7 @@ func TestUpdateMany_ReplicaIdentityFull(t *testing.T) {
 				case 52:
 					require.EqualValues(t, changeset.OperationCommit, cs.Operation)
 				}
+				return nil
 			})
 			csChan := cb.Listen(ctx, r)
 
@@ -393,7 +398,8 @@ func TestUpdateMany_DisableReplicaIdentityFull(t *testing.T) {
 				updates int32
 			)
 
-			cb := eventwriter.NewCallbackWriter(ctx, func(cs *changeset.Changeset) {
+			cb := eventwriter.NewCallbackWriter(ctx, 1, func(batch []*changeset.Changeset) error {
+				cs := batch[0]
 				atomic.AddInt32(&total, 1)
 
 				if cs.Operation == changeset.OperationUpdate {
@@ -455,6 +461,7 @@ func TestUpdateMany_DisableReplicaIdentityFull(t *testing.T) {
 				case 52:
 					require.EqualValues(t, changeset.OperationCommit, cs.Operation)
 				}
+				return nil
 			})
 			csChan := cb.Listen(ctx, r)
 

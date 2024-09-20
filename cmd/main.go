@@ -33,13 +33,15 @@ func main() {
 		panic(err)
 	}
 
-	writer := eventwriter.NewCallbackWriter(ctx, func(cs *changeset.Changeset) {
-		if cs == nil {
-			return
+	writer := eventwriter.NewCallbackWriter(ctx, 1, func(batch []*changeset.Changeset) error {
+		if len(batch) == 0 || batch[0] == nil {
+			return nil
 		}
+		cs := batch[0]
 		evt := eventwriter.ChangesetToEvent(*cs)
 		byt, _ := json.Marshal(evt)
 		fmt.Println(string(byt))
+		return nil
 	})
 	csChan := writer.Listen(ctx, r)
 
