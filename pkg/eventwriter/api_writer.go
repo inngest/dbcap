@@ -29,9 +29,10 @@ func ChangesetToEvent(cs changeset.Changeset) map[string]any {
 func NewAPIClientWriter(
 	ctx context.Context,
 	batchSize int,
+	batchTimeout time.Duration,
 	client inngestgo.Client,
 ) EventWriter {
-	return NewCallbackWriter(ctx, batchSize, func(cs []*changeset.Changeset) error {
+	return NewCallbackWriter(ctx, batchSize, batchTimeout, func(cs []*changeset.Changeset) error {
 		return send(client, cs)
 	})
 }

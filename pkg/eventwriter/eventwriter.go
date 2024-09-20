@@ -3,19 +3,12 @@ package eventwriter
 
 import (
 	"context"
-	"time"
 
 	"github.com/inngest/dbcap/pkg/changeset"
 )
 
 const (
 	eventPrefix = "pg"
-)
-
-var (
-	// batchTimeout represents the time in which we wait for the event writer batch
-	// to fill before sending the current batch of events.
-	batchTimeout = 100 * time.Millisecond
 )
 
 type EventWriter interface {

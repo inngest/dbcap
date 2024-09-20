@@ -83,7 +83,7 @@ func TestCommit(t *testing.T) {
 
 			// Set up event writer which listens to changes
 			var latestReceivedLSN pglogrepl.LSN
-			cb := eventwriter.NewCallbackWriter(ctx, 1, func(cs []*changeset.Changeset) error {
+			cb := eventwriter.NewCallbackWriter(ctx, 1, time.Millisecond, func(cs []*changeset.Changeset) error {
 				latestReceivedLSN = cs[0].Watermark.LSN
 				return nil
 			})
@@ -143,7 +143,7 @@ func TestInsert(t *testing.T) {
 				inserts int32
 			)
 
-			cb := eventwriter.NewCallbackWriter(ctx, 1, func(batch []*changeset.Changeset) error {
+			cb := eventwriter.NewCallbackWriter(ctx, 1, time.Millisecond, func(batch []*changeset.Changeset) error {
 				cs := batch[0]
 				next := atomic.AddInt32(&inserts, 1)
 
@@ -245,7 +245,7 @@ func TestUpdateMany_ReplicaIdentityFull(t *testing.T) {
 				updates int32
 			)
 
-			cb := eventwriter.NewCallbackWriter(ctx, 1, func(batch []*changeset.Changeset) error {
+			cb := eventwriter.NewCallbackWriter(ctx, 1, time.Millisecond, func(batch []*changeset.Changeset) error {
 				cs := batch[0]
 				atomic.AddInt32(&total, 1)
 
@@ -398,7 +398,7 @@ func TestUpdateMany_DisableReplicaIdentityFull(t *testing.T) {
 				updates int32
 			)
 
-			cb := eventwriter.NewCallbackWriter(ctx, 1, func(batch []*changeset.Changeset) error {
+			cb := eventwriter.NewCallbackWriter(ctx, 1, time.Millisecond, func(batch []*changeset.Changeset) error {
 				cs := batch[0]
 				atomic.AddInt32(&total, 1)
 

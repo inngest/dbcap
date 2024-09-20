@@ -14,6 +14,7 @@ import (
 func NewCallbackWriter(
 	ctx context.Context,
 	batchSize int,
+	batchTimeout time.Duration,
 	onChangeset func(cs []*changeset.Changeset) error,
 ) EventWriter {
 	cs := make(chan *changeset.Changeset, batchSize)
@@ -28,13 +29,18 @@ func NewCallbackWriter(
 type cbWriter struct {
 	onChangeset func([]*changeset.Changeset) error
 
-	cs        chan *changeset.Changeset
-	batchSize int
+	cs           chan *changeset.Changeset
+	batchSize    int
+	batchTimeout time.Duration
 
 	wg sync.WaitGroup
 }
 
 func (a *cbWriter) Listen(ctx context.Context, committer changeset.WatermarkCommitter) chan *changeset.Changeset {
+	if a.batchTimeout < 100*time.Millisecond {
+		a.batchTimeout = 100 * time.Millisecond
+	}
+
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -45,7 +51,7 @@ func (a *cbWriter) Listen(ctx context.Context, committer changeset.WatermarkComm
 		// sendCtx is an additional uncancelled CTX which will be cancelled
 		// 5 seconds after the
 		for {
-			timer := time.NewTimer(batchTimeout)
+			timer := time.NewTimer(a.batchTimeout)
 
 			select {
 			case <-ctx.Done():
@@ -59,7 +65,7 @@ func (a *cbWriter) Listen(ctx context.Context, committer changeset.WatermarkComm
 			case <-timer.C:
 				// Force sending current batch
 				if i == 0 {
-					timer.Reset(batchTimeout)
+					timer.Reset(a.batchTimeout)
 					continue
 				}
 
@@ -91,7 +97,7 @@ func (a *cbWriter) Listen(ctx context.Context, committer changeset.WatermarkComm
 				buf[i] = msg
 				i++
 				// Send this batch after at least 5 seconds
-				timer.Reset(batchTimeout)
+				timer.Reset(a.batchTimeout)
 			}
 		}
 	}()

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/inngest/dbcap/pkg/changeset"
 	"github.com/inngest/dbcap/pkg/eventwriter"
@@ -33,7 +34,7 @@ func main() {
 		panic(err)
 	}
 
-	writer := eventwriter.NewCallbackWriter(ctx, 1, func(batch []*changeset.Changeset) error {
+	writer := eventwriter.NewCallbackWriter(ctx, 1, 50*time.Millisecond, func(batch []*changeset.Changeset) error {
 		if len(batch) == 0 || batch[0] == nil {
 			return nil
 		}
