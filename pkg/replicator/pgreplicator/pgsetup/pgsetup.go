@@ -199,6 +199,7 @@ func (s *setup) createUser(ctx context.Context) error {
 		return s.res.UserCreated.Error
 	}
 	s.res.UserCreated.Error = nil
+	s.res.UserCreated.Complete = true
 	return nil
 }
 

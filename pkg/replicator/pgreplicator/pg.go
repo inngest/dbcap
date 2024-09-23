@@ -128,6 +128,7 @@ type pg struct {
 
 func (p *pg) Stop() {
 	atomic.StoreInt32(&p.stopped, 1)
+	_ = p.Close(context.Background())
 }
 
 func (p *pg) Close(ctx context.Context) error {
@@ -180,6 +181,7 @@ func (p *pg) Connect(ctx context.Context, lsn pglogrepl.LSN) error {
 		},
 	)
 	if err != nil {
+		_ = p.Close(ctx)
 		if converted, newErr := standardizeErr(err); converted {
 			return newErr
 		}
