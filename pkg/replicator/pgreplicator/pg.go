@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -100,6 +101,7 @@ func New(ctx context.Context, opts Opts) (PostgresReplicator, error) {
 		conn:      replConn,
 		queryConn: pgxc,
 		decoder:   decoder.NewV1LogicalDecoder(sl),
+		log:       opts.Log,
 	}, nil
 }
 
@@ -259,6 +261,11 @@ func (p *pg) fetch(ctx context.Context) (*changeset.Changeset, error) {
 		if pgconn.Timeout(err) {
 			p.forceNextReport()
 			// We return nil as we want to keep iterating.
+			return nil, nil
+		}
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			// Neon returns unexpected EOFs without new messages.  Handle
+			// this gracefully.
 			return nil, nil
 		}
 		return nil, err
