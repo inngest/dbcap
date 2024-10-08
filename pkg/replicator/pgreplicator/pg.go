@@ -100,7 +100,7 @@ func New(ctx context.Context, opts Opts) (PostgresReplicator, error) {
 		opts:      opts,
 		conn:      replConn,
 		queryConn: pgxc,
-		decoder:   decoder.NewV1LogicalDecoder(sl),
+		decoder:   decoder.NewV1LogicalDecoder(sl, opts.Log),
 		log:       opts.Log,
 	}, nil
 }

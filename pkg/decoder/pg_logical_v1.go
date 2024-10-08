@@ -12,8 +12,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-func NewV1LogicalDecoder(s *schema.PGXSchemaLoader) Decoder {
+func NewV1LogicalDecoder(s *schema.PGXSchemaLoader, log *slog.Logger) Decoder {
 	return v1LogicalDecoder{
+		log:       log,
 		schema:    s,
 		relations: make(map[uint32]*pglogrepl.RelationMessage),
 	}
@@ -81,7 +82,9 @@ func (v v1LogicalDecoder) Decode(in []byte, cs *changeset.Changeset) (bool, erro
 
 	default:
 		// Unsupported message - log and carry on.
-		v.log.Debug("unsupported message type in v1 decoder", "msg_type", msgType.String())
+		if v.log != nil {
+			v.log.Debug("unsupported message type in v1 decoder", "msg_type", msgType)
+		}
 	}
 
 	return false, nil
