@@ -82,6 +82,10 @@ func (a *cbWriter) Listen(ctx context.Context, committer changeset.WatermarkComm
 				buf = make([]*changeset.Changeset, a.batchSize)
 				i = 0
 			case msg := <-a.cs:
+				buf[i] = msg
+				i++
+				// Send this batch after at least 5 seconds
+				timer.Reset(a.batchTimeout)
 				if i == a.batchSize {
 					// send this batch, as we're full.
 					if err := a.onChangeset(buf); err == nil {
@@ -92,11 +96,6 @@ func (a *cbWriter) Listen(ctx context.Context, committer changeset.WatermarkComm
 					i = 0
 					continue
 				}
-				// Appoend the
-				buf[i] = msg
-				i++
-				// Send this batch after at least 5 seconds
-				timer.Reset(a.batchTimeout)
 			}
 		}
 	}()

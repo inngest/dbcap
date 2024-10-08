@@ -17,7 +17,7 @@ import (
 
 const (
 	DefaultSeed        = 123
-	DefaultAccountUUID = "6db2bd8a-2a2f-52d3-aa79-abb4015d6dbd"
+	DefaultAccountUUID = "9b332174-2fc5-5781-8aba-b2500384cc1c"
 	DefaultEmail       = "lriai1h2oy1d@example.com"
 )
 
@@ -87,10 +87,6 @@ func InsertAccounts(t *testing.T, ctx context.Context, cfg pgx.ConnConfig, opts 
 			<-time.After(opts.Interval)
 		}
 	}
-}
-
-func InsertAccountsAndUsers(t *testing.T, ctx context.Context, opts InsertOpts) {
-	panic("nah")
 }
 
 func hash(in any) string {

@@ -3,9 +3,11 @@ package test
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"testing"
 
+	"github.com/docker/docker/pkg/ioutils"
 	"github.com/inngest/dbcap/pkg/replicator/pgreplicator/pgsetup"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -22,6 +24,10 @@ type StartPGOpts struct {
 	// DisableReplicaIdentityFull disables replica identity full, skipping old tuples
 	// in updates.
 	DisableReplicaIdentityFull bool
+}
+
+func init() {
+	tc.Logger = log.New(&ioutils.NopWriter{}, "", 0)
 }
 
 func StartPG(t *testing.T, ctx context.Context, opts StartPGOpts) (tc.Container, pgx.ConnConfig) {
