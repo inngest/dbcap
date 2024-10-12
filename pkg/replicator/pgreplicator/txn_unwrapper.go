@@ -30,6 +30,12 @@ func (t *txnUnwrapper) Process(cs *changeset.Changeset) {
 	}
 
 	switch cs.Operation {
+	case changeset.OperationHeartbeat:
+		// The unwrapper should never receive heartbeats as the replicator should
+		// handle them and short circuit.  However, always transmit them immediately
+		// for safety in code in case someone changes something in the future.
+		t.cc <- cs
+		return
 	case changeset.OperationBegin:
 		t.begin = cs
 	case changeset.OperationCommit:

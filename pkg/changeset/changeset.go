@@ -16,6 +16,11 @@ const (
 	OperationUpdate   Operation = "UPDATE"
 	OperationDelete   Operation = "DELETE"
 	OperationTruncate Operation = "TRUNCATE"
+
+	// OperationHeartbeat represents the changeset generated for heartbeats when we
+	// send messages to increase the WAL LSN.  This is used for updating watermarks only,
+	// and should not process events.
+	OperationHeartbeat Operation = "HEARTBEAT"
 )
 
 // WatermarkCommitter is an interface that commits a given watermark to backing datastores.

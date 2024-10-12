@@ -214,6 +214,53 @@ func TestInsert(t *testing.T) {
 	}
 }
 
+func TestLogicalEmitHeartbeat(t *testing.T) {
+	t.Parallel()
+	versions := []int{14, 15, 16}
+
+	for _, v1 := range versions {
+		v := v1 // loop capture
+		t.Run(fmt.Sprintf("EmitHeartbeat - Postgres %d", v), func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithCancel(context.Background())
+
+			c, conn := test.StartPG(t, ctx, test.StartPGOpts{Version: v})
+			opts := Opts{Config: conn}
+			repl, err := New(ctx, opts)
+
+			// heartbeat fast in tests.
+			r := repl.(*pg)
+			r.heartbeatTime = 250 * time.Millisecond
+			require.NoError(t, err)
+
+			cb := eventwriter.NewCallbackWriter(ctx, 1, time.Millisecond, func(batch []*changeset.Changeset) error {
+				return nil
+			})
+			csChan := cb.Listen(ctx, r)
+
+			go func() {
+				err := r.Pull(ctx, csChan)
+				require.NoError(t, err)
+			}()
+
+			slotA, err := r.ReplicationSlot(ctx)
+			require.NoError(t, err)
+
+			<-time.After(1100 * time.Millisecond)
+
+			slotB, err := r.ReplicationSlot(ctx)
+			require.NoError(t, err)
+
+			require.NotEqual(t, slotA.ConfirmedFlushLSN, slotB.ConfirmedFlushLSN)
+			require.True(t, int(slotB.ConfirmedFlushLSN) > int(slotA.ConfirmedFlushLSN))
+
+			cancel()
+			_ = c.Stop(ctx, nil)
+		})
+	}
+}
+
 func TestUpdateMany_ReplicaIdentityFull(t *testing.T) {
 	t.Parallel()
 	versions := []int{12, 13, 14, 15, 16}
