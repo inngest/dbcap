@@ -281,7 +281,9 @@ func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 
 		if changes.Operation == changeset.OperationHeartbeat {
 			p.Commit(changes.Watermark)
-			p.forceNextReport(ctx)
+			if err := p.forceNextReport(ctx); err != nil {
+				p.log.Warn("unable to report lsn on heartbeat", "error", err, "host", p.opts.Config.Host)
+			}
 			continue
 		}
 
@@ -311,7 +313,9 @@ func (p *pg) fetch(ctx context.Context) (*changeset.Changeset, error) {
 
 	if err != nil {
 		if pgconn.Timeout(err) {
-			p.forceNextReport(ctx)
+			if err := p.forceNextReport(ctx); err != nil {
+				p.log.Warn("unable to report lsn on timeout", "error", err, "host", p.opts.Config.Host)
+			}
 			// We return nil as we want to keep iterating.
 			return nil, nil
 		}
@@ -343,7 +347,9 @@ func (p *pg) fetch(ctx context.Context) (*changeset.Changeset, error) {
 			return nil, fmt.Errorf("error parsing replication keepalive: %w", err)
 		}
 		if pkm.ReplyRequested {
-			p.forceNextReport(ctx)
+			if err := p.forceNextReport(ctx); err != nil {
+				p.log.Warn("unable to report lsn on request", "error", err, "host", p.opts.Config.Host)
+			}
 		}
 		return nil, nil
 	case pglogrepl.XLogDataByteID:
@@ -401,11 +407,11 @@ func (p *pg) committedWatermark() (wm changeset.Watermark) {
 	}
 }
 
-func (p *pg) forceNextReport(ctx context.Context) {
+func (p *pg) forceNextReport(ctx context.Context) error {
 	// Updating the next report time to a zero time always reports the LSN,
 	// as time.Now() is always after the empty time.
 	p.nextReportTime = time.Time{}
-	p.report(ctx, true)
+	return p.report(ctx, true)
 }
 
 // report reports the current replication slot's LSN progress to the server.  We can optionally
@@ -462,7 +468,7 @@ type ReplicationSlot struct {
 
 func ReplicationSlotData(ctx context.Context, conn *pgx.Conn) (ReplicationSlot, error) {
 	ret := ReplicationSlot{}
-	rows, err := conn.Query(
+	row := conn.QueryRow(
 		ctx,
 		fmt.Sprintf(`SELECT
                         active, restart_lsn, confirmed_flush_lsn
@@ -470,16 +476,7 @@ func ReplicationSlotData(ctx context.Context, conn *pgx.Conn) (ReplicationSlot, 
 			pgconsts.SlotName,
 		),
 	)
-	defer rows.Close()
-	if err != nil {
-		return ReplicationSlot{}, err
-	}
-
-	if !rows.Next() {
-		return ReplicationSlot{}, ErrReplicationSlotNotFound
-	}
-
-	err = rows.Scan(&ret.Active, &ret.RestartLSN, &ret.ConfirmedFlushLSN)
+	err := row.Scan(&ret.Active, &ret.RestartLSN, &ret.ConfirmedFlushLSN)
 	// pgx has its own ErrNoRows :(
 	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
 		return ret, ErrReplicationSlotNotFound
