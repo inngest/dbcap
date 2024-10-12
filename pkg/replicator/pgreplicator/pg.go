@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,8 +25,9 @@ import (
 )
 
 var (
-	ReadTimeout    = time.Second * 5
-	CommitInterval = time.Second * 5
+	ReadTimeout          = time.Second * 5
+	CommitInterval       = time.Second * 5
+	DefaultHeartbeatTime = time.Minute
 )
 
 // PostgresReplicator is a Replicator with added postgres functionality.
@@ -61,6 +63,12 @@ type Opts struct {
 
 // New returns a new postgres replicator for a single postgres database.
 func New(ctx context.Context, opts Opts) (PostgresReplicator, error) {
+	if opts.Log == nil {
+		opts.Log = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}))
+	}
+
 	cfg := opts.Config
 
 	// Ensure that we add "replication": "database" as a to the replication
@@ -84,24 +92,28 @@ func New(ctx context.Context, opts Opts) (PostgresReplicator, error) {
 		return nil, fmt.Errorf("error connecting to postgres host for schemas: %w", err)
 	}
 
+	// Query for current postgres version.
+	var version int
+	row := pgxc.QueryRow(ctx, "SELECT current_setting('server_version_num')::int / 10000;")
+	if err := row.Scan(&version); err != nil {
+		opts.Log.Warn("error querying for postgres version", "error", err)
+	}
+
 	sl := schema.NewPGXSchemaLoader(pgxc)
 	// Refresh all schemas to begin with
 	if err := sl.Refresh(); err != nil {
 		return nil, err
 	}
 
-	if opts.Log == nil {
-		opts.Log = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
-			Level: slog.LevelInfo,
-		}))
-	}
-
 	return &pg{
-		opts:      opts,
-		conn:      replConn,
-		queryConn: pgxc,
-		decoder:   decoder.NewV1LogicalDecoder(sl, opts.Log),
-		log:       opts.Log,
+		opts:          opts,
+		conn:          replConn,
+		queryConn:     pgxc,
+		queryLock:     &sync.Mutex{},
+		decoder:       decoder.NewV1LogicalDecoder(sl, opts.Log, version >= pgconsts.MessagesVersion),
+		log:           opts.Log,
+		version:       version,
+		heartbeatTime: DefaultHeartbeatTime,
 	}, nil
 }
 
@@ -111,8 +123,14 @@ type pg struct {
 	// conn is the WAL streaming connection.  Once replication starts, this
 	// conn cannot be used for any queries.
 	conn *pgx.Conn
+
 	// queryCon is a conn for querying data.
 	queryConn *pgx.Conn
+
+	// queryLock is used to lock pgx.Conn, as it's a single connection which cannot be used
+	// in parallel.
+	queryLock *sync.Mutex
+
 	// decoder decodes the binary WAL log
 	decoder decoder.Decoder
 	// nextReportTime records the time in which we must next report the current
@@ -124,6 +142,9 @@ type pg struct {
 	lsnTime int64
 	// log is a stdlib logger for reporting debug and warn logs.
 	log *slog.Logger
+
+	version       int
+	heartbeatTime time.Duration
 
 	stopped int32
 }
@@ -140,13 +161,19 @@ func (p *pg) Close(ctx context.Context) error {
 }
 
 func (p *pg) ReplicationSlot(ctx context.Context) (ReplicationSlot, error) {
+
 	mode, err := p.walMode(ctx)
 	if err != nil {
 		return ReplicationSlot{}, err
 	}
+
 	if mode != "logical" {
 		return ReplicationSlot{}, ErrLogicalReplicationNotSetUp
 	}
+
+	// Lock when querying repl slot data.
+	p.queryLock.Lock()
+	defer p.queryLock.Unlock()
 
 	return ReplicationSlotData(ctx, p.queryConn)
 }
@@ -218,6 +245,25 @@ func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 	// the DML.
 	unwrapper := &txnUnwrapper{cc: cc}
 
+	go func() {
+		if p.version < pgconsts.MessagesVersion {
+			// doesn't support wal messages;  ignore.
+			return
+		}
+
+		t := time.NewTicker(p.heartbeatTime)
+		for range t.C {
+			// Send a hearbeat every minute
+			p.queryLock.Lock()
+			_, err := p.queryConn.Exec(ctx, "SELECT pg_logical_emit_message(false, 'heartbeat', now()::varchar);")
+			p.queryLock.Unlock()
+
+			if err != nil {
+				p.log.Warn("unable to emit heartbeat", "error", err, "host", p.opts.Config.Host)
+			}
+		}
+	}()
+
 	for {
 		if ctx.Err() != nil || atomic.LoadInt32(&p.stopped) == 1 {
 			// Always call Close automatically.
@@ -230,6 +276,12 @@ func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 			return err
 		}
 		if changes == nil {
+			continue
+		}
+
+		if changes.Operation == changeset.OperationHeartbeat {
+			p.Commit(changes.Watermark)
+			p.forceNextReport(ctx)
 			continue
 		}
 
@@ -259,7 +311,7 @@ func (p *pg) fetch(ctx context.Context) (*changeset.Changeset, error) {
 
 	if err != nil {
 		if pgconn.Timeout(err) {
-			p.forceNextReport()
+			p.forceNextReport(ctx)
 			// We return nil as we want to keep iterating.
 			return nil, nil
 		}
@@ -291,7 +343,7 @@ func (p *pg) fetch(ctx context.Context) (*changeset.Changeset, error) {
 			return nil, fmt.Errorf("error parsing replication keepalive: %w", err)
 		}
 		if pkm.ReplyRequested {
-			p.forceNextReport()
+			p.forceNextReport(ctx)
 		}
 		return nil, nil
 	case pglogrepl.XLogDataByteID:
@@ -316,6 +368,7 @@ func (p *pg) fetch(ctx context.Context) (*changeset.Changeset, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error decoding xlog data: %w", err)
 		}
+
 		if !ok {
 			return nil, nil
 		}
@@ -348,10 +401,11 @@ func (p *pg) committedWatermark() (wm changeset.Watermark) {
 	}
 }
 
-func (p *pg) forceNextReport() {
+func (p *pg) forceNextReport(ctx context.Context) {
 	// Updating the next report time to a zero time always reports the LSN,
 	// as time.Now() is always after the empty time.
 	p.nextReportTime = time.Time{}
+	p.report(ctx, true)
 }
 
 // report reports the current replication slot's LSN progress to the server.  We can optionally
@@ -384,6 +438,9 @@ func (p *pg) LSN() (lsn pglogrepl.LSN) {
 }
 
 func (p *pg) walMode(ctx context.Context) (string, error) {
+	p.queryLock.Lock()
+	defer p.queryLock.Unlock()
+
 	var mode string
 	row := p.queryConn.QueryRow(ctx, "SHOW wal_level")
 	err := row.Scan(&mode)
@@ -405,15 +462,24 @@ type ReplicationSlot struct {
 
 func ReplicationSlotData(ctx context.Context, conn *pgx.Conn) (ReplicationSlot, error) {
 	ret := ReplicationSlot{}
-	row := conn.QueryRow(
+	rows, err := conn.Query(
 		ctx,
 		fmt.Sprintf(`SELECT
-			active, restart_lsn, confirmed_flush_lsn
-			FROM pg_replication_slots WHERE slot_name = '%s';`,
+                        active, restart_lsn, confirmed_flush_lsn
+                        FROM pg_replication_slots WHERE slot_name = '%s';`,
 			pgconsts.SlotName,
 		),
 	)
-	err := row.Scan(&ret.Active, &ret.RestartLSN, &ret.ConfirmedFlushLSN)
+	defer rows.Close()
+	if err != nil {
+		return ReplicationSlot{}, err
+	}
+
+	if !rows.Next() {
+		return ReplicationSlot{}, ErrReplicationSlotNotFound
+	}
+
+	err = rows.Scan(&ret.Active, &ret.RestartLSN, &ret.ConfirmedFlushLSN)
 	// pgx has its own ErrNoRows :(
 	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
 		return ret, ErrReplicationSlotNotFound
