@@ -253,6 +253,10 @@ func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 
 		t := time.NewTicker(p.heartbeatTime)
 		for range t.C {
+			if ctx.Err() != nil {
+				return
+			}
+
 			// Send a hearbeat every minute
 			p.queryLock.Lock()
 			_, err := p.queryConn.Exec(ctx, "SELECT pg_logical_emit_message(false, 'heartbeat', now()::varchar);")
