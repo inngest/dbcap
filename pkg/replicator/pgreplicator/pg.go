@@ -253,7 +253,7 @@ func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 
 		t := time.NewTicker(p.heartbeatTime)
 		for range t.C {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || p.queryConn.IsClosed() {
 				return
 			}
 
@@ -262,6 +262,10 @@ func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 			_, err := p.queryConn.Exec(ctx, "SELECT pg_logical_emit_message(false, 'heartbeat', now()::varchar);")
 			p.queryLock.Unlock()
 
+			if isConnClosedErr(err) && p.queryConn.IsClosed() {
+				return
+			}
+
 			if err != nil {
 				p.log.Warn("unable to emit heartbeat", "error", err, "host", p.opts.Config.Host)
 			}
@@ -269,7 +273,7 @@ func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 	}()
 
 	for {
-		if ctx.Err() != nil || atomic.LoadInt32(&p.stopped) == 1 {
+		if ctx.Err() != nil || atomic.LoadInt32(&p.stopped) == 1 || p.conn.IsClosed() {
 			// Always call Close automatically.
 			p.Close(ctx)
 			return nil
@@ -500,4 +504,8 @@ func standardizeErr(err error) (bool, error) {
 		return true, ErrReplicationAlreadyRunning
 	}
 	return false, err
+}
+
+func isConnClosedErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "conn closed")
 }
