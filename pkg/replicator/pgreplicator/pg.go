@@ -290,7 +290,7 @@ func (p *pg) Pull(ctx context.Context, cc chan *changeset.Changeset) error {
 			p.queryLock.Unlock()
 
 			if isConnClosedErr(err) && p.queryConn.IsClosed() {
-				return
+				continue
 			}
 
 			if err != nil {
