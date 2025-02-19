@@ -19,6 +19,8 @@ var (
 type InitializeResult = pgsetup.TestConnResult
 
 type InitializerOpts struct {
+	Teardown bool
+
 	// AdminConfig are admin credentials to verify DB config, eg. replication slots, publications,
 	// wal mode, etc.
 	AdminConfig pgx.ConnConfig
@@ -49,6 +51,16 @@ type initializer[T pgsetup.TestConnResult] struct {
 
 // PerformInit perform setup for the replicator.
 func (i initializer[T]) PerformInit(ctx context.Context) (InitializeResult, error) {
+	if i.opts.Teardown {
+		// Optionally teardown any previous setup.
+		err := pgsetup.Teardown(ctx, pgsetup.SetupOpts{
+			AdminConfig: i.opts.AdminConfig,
+		})
+		if err != nil {
+			return InitializeResult{}, err
+		}
+	}
+
 	return pgsetup.Setup(ctx, pgsetup.SetupOpts{
 		AdminConfig: i.opts.AdminConfig,
 		Password:    i.opts.Password,
