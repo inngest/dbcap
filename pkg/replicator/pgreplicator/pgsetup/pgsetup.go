@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/inngest/dbcap/pkg/consts/pgconsts"
 	"github.com/inngest/dbcap/pkg/replicator"
@@ -74,6 +75,7 @@ type SetupOpts struct {
 	DisableCreatePublication bool
 }
 
+// Setup sets up Postgres for replication.
 func Setup(ctx context.Context, opts SetupOpts) (TestConnResult, error) {
 	conn, err := pgx.ConnectConfig(ctx, &opts.AdminConfig)
 	if err != nil {
@@ -98,6 +100,43 @@ func Check(ctx context.Context, opts SetupOpts) (TestConnResult, error) {
 		c:    conn,
 	}
 	return setup.Check(ctx)
+}
+
+// Teardown removes the replication slot, user, and publication slots from
+// Postgres, bringing us to the default state.
+func Teardown(ctx context.Context, opts SetupOpts) error {
+	conn, err := pgx.ConnectConfig(ctx, &opts.AdminConfig)
+	if err != nil {
+		return err
+	}
+
+	_, err = conn.Exec(ctx, fmt.Sprintf(
+		`
+		REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM %s;
+		ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM %s;
+		REVOKE SELECT ON ALL TABLES IN SCHEMA public FROM %s;
+		REVOKE USAGE ON SCHEMA public FROM %s;
+		DROP PUBLICATION %s;
+		DROP USER %s;
+		SELECT pg_drop_replication_slot('%s');
+		`,
+		pgconsts.Username,
+		pgconsts.Username,
+		pgconsts.Username,
+		pgconsts.Username,
+		pgconsts.PublicationName,
+		pgconsts.Username,
+		pgconsts.SlotName,
+	))
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(err.Error(), "does not exist") {
+		// Not set up
+		return nil
+	}
+
+	return err
 }
 
 type setup struct {
