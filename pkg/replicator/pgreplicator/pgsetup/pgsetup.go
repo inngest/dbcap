@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/inngest/dbcap/pkg/consts/pgconsts"
 	"github.com/inngest/dbcap/pkg/replicator"
@@ -104,39 +106,114 @@ func Check(ctx context.Context, opts SetupOpts) (TestConnResult, error) {
 
 // Teardown removes the replication slot, user, and publication slots from
 // Postgres, bringing us to the default state.
+// Each step is executed individually so that partial failures (e.g. a
+// resource that was already removed) don't block the rest of the cleanup.
+// If the replication slot is active, we terminate the backend holding it
+// before attempting to drop the slot.
 func Teardown(ctx context.Context, opts SetupOpts) error {
 	conn, err := pgx.ConnectConfig(ctx, &opts.AdminConfig)
 	if err != nil {
 		return err
 	}
+	defer conn.Close(ctx)
 
-	_, err = conn.Exec(ctx, fmt.Sprintf(
-		`
-		REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM %s;
-		ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM %s;
-		REVOKE SELECT ON ALL TABLES IN SCHEMA public FROM %s;
-		REVOKE USAGE ON SCHEMA public FROM %s;
-		DROP PUBLICATION %s;
-		DROP USER %s;
-		SELECT pg_drop_replication_slot('%s');
-		`,
-		pgconsts.Username,
-		pgconsts.Username,
-		pgconsts.Username,
-		pgconsts.Username,
-		pgconsts.PublicationName,
-		pgconsts.Username,
+	//
+	// Drop the replication slot first - it must be done before dropping the
+	// user who may own it, and we need to handle the "slot is active" case.
+	if err := teardownReplicationSlot(ctx, conn); err != nil {
+		return fmt.Errorf("error dropping replication slot: %w", err)
+	}
+
+	//
+	// Drop the publication before revoking privileges or dropping the user.
+	execIgnoreNotExist(ctx, conn, fmt.Sprintf(`DROP PUBLICATION IF EXISTS %s`, pgconsts.PublicationName))
+
+	//
+	// Revoke privileges (best-effort, ignore errors for missing roles).
+	revokeStmts := []string{
+		fmt.Sprintf(`REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM %s`, pgconsts.Username),
+		fmt.Sprintf(`ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM %s`, pgconsts.Username),
+		fmt.Sprintf(`REVOKE SELECT ON ALL TABLES IN SCHEMA public FROM %s`, pgconsts.Username),
+		fmt.Sprintf(`REVOKE USAGE ON SCHEMA public FROM %s`, pgconsts.Username),
+	}
+	for _, stmt := range revokeStmts {
+		execIgnoreNotExist(ctx, conn, stmt)
+	}
+
+	//
+	// Finally drop the user.
+	execIgnoreNotExist(ctx, conn, fmt.Sprintf(`DROP USER IF EXISTS %s`, pgconsts.Username))
+	return nil
+}
+
+// teardownReplicationSlot drops the inngest_cdc replication slot, first
+// terminating any active backend that is holding the slot open.
+func teardownReplicationSlot(ctx context.Context, conn *pgx.Conn) error {
+	//
+	// Check whether the slot exists and whether it is active.
+	row := conn.QueryRow(ctx,
+		`SELECT active_pid FROM pg_replication_slots WHERE slot_name = $1`,
 		pgconsts.SlotName,
-	))
+	)
+	var activePID *int
+	err := row.Scan(&activePID)
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("error checking replication slot: %w", err)
+	}
+
+	//
+	// If the slot is active, terminate the backend holding it.
+	if activePID != nil && *activePID > 0 {
+		_, err := conn.Exec(ctx, `SELECT pg_terminate_backend($1)`, *activePID)
+		if err != nil {
+			return fmt.Errorf("error terminating replication backend (PID %d): %w", *activePID, err)
+		}
+	}
+
+	//
+	// Now drop the slot. If termination needs a moment, retry once.
+	_, err = conn.Exec(ctx, fmt.Sprintf(`SELECT pg_drop_replication_slot('%s')`, pgconsts.SlotName))
 	if err == nil {
 		return nil
 	}
+
 	if strings.Contains(err.Error(), "does not exist") {
-		// Not set up
 		return nil
 	}
 
+	// If still active (race condition), wait briefly and retry once.
+	if strings.Contains(err.Error(), "is active") {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+
+		_, err = conn.Exec(ctx, fmt.Sprintf(`SELECT pg_drop_replication_slot('%s')`, pgconsts.SlotName))
+		if err == nil || strings.Contains(err.Error(), "does not exist") {
+			return nil
+		}
+		return fmt.Errorf("replication slot still active after terminating backend: %w", err)
+	}
+
 	return err
+}
+
+// execIgnoreNotExist runs a SQL statement and silently ignores "does not
+// exist" errors (e.g. when a role or publication was already removed).
+func execIgnoreNotExist(ctx context.Context, conn *pgx.Conn, stmt string) {
+	_, err := conn.Exec(ctx, stmt)
+	if err == nil {
+		return
+	}
+	if strings.Contains(err.Error(), "does not exist") {
+		slog.Warn("cdc teardown: resource already removed", "stmt", stmt, "error", err.Error())
+		return
+	}
+	slog.Warn("cdc teardown: ignoring non-critical error", "stmt", stmt, "error", err.Error())
 }
 
 type setup struct {
