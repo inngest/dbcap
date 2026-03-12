@@ -120,8 +120,9 @@ func Teardown(ctx context.Context, opts SetupOpts) error {
 	//
 	// Drop the replication slot first - it must be done before dropping the
 	// user who may own it, and we need to handle the "slot is active" case.
+	// Non-fatal: if this fails, continue with the rest of the cleanup.
 	if err := teardownReplicationSlot(ctx, conn); err != nil {
-		return fmt.Errorf("error dropping replication slot: %w", err)
+		slog.Warn("error dropping replication slot during teardown (continuing)", "error", err)
 	}
 
 	//
@@ -175,7 +176,7 @@ func teardownReplicationSlot(ctx context.Context, conn *pgx.Conn) error {
 
 	//
 	// Now drop the slot. If termination needs a moment, retry once.
-	_, err = conn.Exec(ctx, fmt.Sprintf(`SELECT pg_drop_replication_slot('%s')`, pgconsts.SlotName))
+	_, err = conn.Exec(ctx, `SELECT pg_drop_replication_slot($1)`, pgconsts.SlotName)
 	if err == nil {
 		return nil
 	}
@@ -192,7 +193,7 @@ func teardownReplicationSlot(ctx context.Context, conn *pgx.Conn) error {
 		case <-time.After(2 * time.Second):
 		}
 
-		_, err = conn.Exec(ctx, fmt.Sprintf(`SELECT pg_drop_replication_slot('%s')`, pgconsts.SlotName))
+		_, err = conn.Exec(ctx, `SELECT pg_drop_replication_slot($1)`, pgconsts.SlotName)
 		if err == nil || strings.Contains(err.Error(), "does not exist") {
 			return nil
 		}
@@ -202,8 +203,10 @@ func teardownReplicationSlot(ctx context.Context, conn *pgx.Conn) error {
 	return err
 }
 
-// execIgnoreNotExist runs a SQL statement and silently ignores "does not
-// exist" errors (e.g. when a role or publication was already removed).
+// execIgnoreNotExist runs a SQL statement and logs any errors without
+// returning them. "does not exist" errors are expected (resource already
+// removed); other errors are also logged and ignored so that teardown
+// can proceed through all cleanup steps.
 func execIgnoreNotExist(ctx context.Context, conn *pgx.Conn, stmt string) {
 	_, err := conn.Exec(ctx, stmt)
 	if err == nil {
@@ -213,7 +216,7 @@ func execIgnoreNotExist(ctx context.Context, conn *pgx.Conn, stmt string) {
 		slog.Warn("cdc teardown: resource already removed", "stmt", stmt, "error", err.Error())
 		return
 	}
-	slog.Warn("cdc teardown: ignoring non-critical error", "stmt", stmt, "error", err.Error())
+	slog.Error("cdc teardown: unexpected error (ignoring to continue cleanup)", "stmt", stmt, "error", err.Error())
 }
 
 type setup struct {
